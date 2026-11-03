@@ -76,7 +76,7 @@ export default function ElementDetailsDialog({ details, onClose, placement = "bo
               else to head the dialog with. */}
           <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}
                title={task ? task.name : name}>
-            <span style={{ fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 14.5, lineHeight: 1.2,
+            <span style={{ fontWeight: 600, fontSize: 14.5, lineHeight: 1.2,
                           color: "var(--ink-700)", overflow: "hidden",
                           textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {task ? task.name : name}
