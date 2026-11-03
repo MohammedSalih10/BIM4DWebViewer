@@ -1,16 +1,42 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
-.claude/
+dist-ssr/
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files
 .env
 .env.*
-*.log
+!.env.example
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
 .DS_Store
 Thumbs.db
-.vscode/
-*.ifc
-# P6 exports used as test data (the app no longer reads them)
-*.xml
+*.suo
+*.sw?
 
-# scratch / verification output
-*.png
-screenshots/
+# Claude Code local settings
+.claude/settings.local.json
+
+# Test artifacts / screenshots (Playwright etc.)
+playwright-report/
+test-results/
+.playwright/
+*.screenshot.png
+
+# Sample / test BIM models (large, client data) — drop them in the repo root locally
+*.ifc
+*.ifczip
+*.xer

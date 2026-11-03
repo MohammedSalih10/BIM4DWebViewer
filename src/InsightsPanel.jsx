@@ -177,10 +177,13 @@ export default function InsightsPanel({
 
   // Top-level categories only -- a full tree of bars here would fight the Contents
   // panel on the other side of the screen for the same information at more depth.
-  const categoryBars = (contents?.categoryTree || []).map(node => ({
+  // Memoized: this panel re-renders every playback tick (currentDate changes), and
+  // without memoizing, every category's full element-id scan (`pctReached`) ran again
+  // every single tick even on ticks where none of the percentages actually moved.
+  const categoryBars = useMemo(() => (contents?.categoryTree || []).map(node => ({
     key: node.key, label: node.label, count: node.count,
     pct: pctReached(node.ids, schedule, currentDate),
-  }));
+  })), [contents, schedule, currentDate]);
 
   return (
     <aside style={{
@@ -195,7 +198,7 @@ export default function InsightsPanel({
         style={{
           position: "absolute", left: -3, top: 0, bottom: 0, width: 6,
           cursor: "col-resize", zIndex: 2,
-          background: resizing ? "rgba(0,147,210,.5)" : "transparent",
+          background: resizing ? "rgba(63,110,140,.5)" : "transparent",
         }}
       />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -205,7 +208,7 @@ export default function InsightsPanel({
                         textTransform: "uppercase", color: "var(--ink-700)" }}>
             {selectedTask ? "Task insights" : "Project insights"}
           </div>
-          <div style={{ fontSize: 10.5, color: "var(--ink-400)", overflow: "hidden",
+          <div style={{ fontSize: 11.5, color: "var(--ink-400)", overflow: "hidden",
                         textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {selectedTask ? (selectedTask.code || selectedTask.name) : "Planned vs actual"}
           </div>
@@ -221,7 +224,7 @@ export default function InsightsPanel({
 
         {/* --- stat cards ------------------------------------------------------- */}
         <div style={{ padding: "12px 12px 14px", borderBottom: "1px solid var(--line-soft)" }}>
-          <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: "0.09em",
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.09em",
                         textTransform: "uppercase", color: "var(--ink-400)", marginBottom: 9 }}>
             {selectedTask ? "Task metrics" : "Project metrics"}
           </div>
@@ -252,13 +255,13 @@ export default function InsightsPanel({
                     {s.value}
                   </span>
                   {s.unit && (
-                    <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.04em",
+                    <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: "0.04em",
                                    color: "var(--aar-blue)" }}>
                       {s.unit}
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: 9.5, color: "var(--ink-400)", marginTop: 4 }}>{s.label}</div>
+                <div style={{ fontSize: 11, color: "var(--ink-400)", marginTop: 4 }}>{s.label}</div>
               </div>
             ))}
           </div>
@@ -267,13 +270,13 @@ export default function InsightsPanel({
         {/* --- progress by category -------------------------------------------- */}
         {categoryBars.length > 0 && (
           <div style={{ padding: "12px 12px 14px", borderBottom: "1px solid var(--line-soft)" }}>
-            <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: "0.09em",
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.09em",
                           textTransform: "uppercase", color: "var(--ink-400)", marginBottom: 10 }}>
               Progress by category
             </div>
             {categoryBars.map(b => (
               <div key={b.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-                <span style={{ width: 92, flexShrink: 0, fontSize: 10.5, color: "var(--ink-600)",
+                <span style={{ width: 92, flexShrink: 0, fontSize: 11.5, color: "var(--ink-600)",
                                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                       title={b.label}>
                   {b.label}
@@ -287,7 +290,7 @@ export default function InsightsPanel({
                   }} />
                 </span>
                 <span style={{ width: 32, textAlign: "right", fontFamily: "var(--font-mono)",
-                               fontSize: 10, color: "var(--ink-400)" }}>
+                               fontSize: 11, color: "var(--ink-400)" }}>
                   {b.pct == null ? "—" : `${b.pct}%`}
                 </span>
               </div>
@@ -299,11 +302,11 @@ export default function InsightsPanel({
         <div style={{ padding: "12px 12px 14px", borderBottom: "1px solid var(--line-soft)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
                         marginBottom: 8 }}>
-            <span style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: "0.09em",
+            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.09em",
                           textTransform: "uppercase", color: "var(--ink-400)" }}>
               Progress S-curve
             </span>
-            <span style={{ fontSize: 9.5, color: "var(--ink-400)" }}>
+            <span style={{ fontSize: 11, color: "var(--ink-400)" }}>
               {schedule?.hasBaseline ? "Baseline vs actual" : "Baseline only"}
             </span>
           </div>
@@ -318,7 +321,7 @@ export default function InsightsPanel({
                   <path d={seriesToPath(curve.actual) + " L" +
                            ((curve.now - curve.min) / (curve.max - curve.min) * 260).toFixed(1) +
                            " 82 L0 82 Z"}
-                        fill="rgba(0,147,210,.12)" stroke="none" />
+                        fill="rgba(63,110,140,.12)" stroke="none" />
                 )}
                 {schedule?.hasBaseline && (
                   <path d={seriesToPath(curve.actual)} fill="none" stroke="var(--aar-blue)" strokeWidth="2" />
@@ -327,7 +330,7 @@ export default function InsightsPanel({
                       x2={((curve.now - curve.min) / (curve.max - curve.min) * 260).toFixed(1)} y2="83"
                       stroke="var(--status-delayed)" strokeWidth="1.5" />
               </svg>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6, fontSize: 10,
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6, fontSize: 11,
                             color: "var(--ink-400)" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   <span style={{ width: 12, height: 0, borderTop: "1.5px dashed var(--ink-300)",
@@ -353,7 +356,7 @@ export default function InsightsPanel({
 
         {/* --- attributes -------------------------------------------------------- */}
         <div style={{ padding: "12px 12px 16px" }}>
-          <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: "0.09em",
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.09em",
                         textTransform: "uppercase", color: "var(--ink-400)", marginBottom: 9 }}>
             {selectedTask ? "Task attributes" : "Schedule attributes"}
           </div>
@@ -383,7 +386,7 @@ export default function InsightsPanel({
           ).map(([k, v, color]) => (
             <div key={k} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between",
                                    gap: 10, padding: "5px 0", borderBottom: "1px solid var(--paper-cool)" }}>
-              <span style={{ fontSize: 10.5, color: "var(--ink-400)", whiteSpace: "nowrap" }}>{k}</span>
+              <span style={{ fontSize: 11.5, color: "var(--ink-400)", whiteSpace: "nowrap" }}>{k}</span>
               <span style={{ fontSize: 11, fontWeight: 500, color: color || "var(--ink-700)",
                              textAlign: "right", overflow: "hidden", textOverflow: "ellipsis",
                              whiteSpace: "nowrap" }}>

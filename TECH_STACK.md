@@ -1,6 +1,6 @@
 # 4D BIM Web Viewer — Tech Stack & Architecture
 
-_A snapshot of what this project is actually built on, as of 2026-11-03._
+_A snapshot of what this project is actually built on, as of 2026-08-07._
 
 ---
 
@@ -63,6 +63,7 @@ reading** (pure logic, framework-agnostic) and **React components** (the UI).
 | File | Job |
 |---|---|
 | `ifcSchedule.js` | The one shared 4D-schedule reader. Pulls the WBS task tree, planned/actual/baseline dates, dependency links, and which elements each task builds, out of `IfcScheduleTimeControl` (not `IfcTask` directly — see the file's header for the IFC2X3 traps this had to work around). Also runs the critical-path (longest driving path, not just zero-float) calculation, and `withBaseline()` / merge logic for combining a progressed export with an earlier plan-only one. |
+| `p6Xml.js` | Hand-parsed reader (no `DOMParser`, so it also runs under Node for the test harness) for Primavera P6's XML export — the **preferred** baseline source, since P6 XML carries true Planned/Actual/BL dates in one file where a Synchro IFC2X3 export cannot. |
 | `ifcElements.js` | Builds the "Contents" panel tree — elements grouped as building elements (wall, slab, door), by storey then category then type, the way Synchro's own Contents panel presents them. |
 | `ifcMaterials.js` | The opposite question: "what is this made of" — infers a plausible material/colour from element/type names for files (like Synchro's) that strip real IFC colour data, plus the shared status/highlight material factories every viewer uses. |
 | `elementDetails.js` | On-demand, single-element fetch (name + owning task + dates) for the click-to-inspect popover — deliberately a third, separate pass from the two bulk reads above. |
@@ -81,7 +82,7 @@ reading** (pure logic, framework-agnostic) and **React components** (the UI).
 | `ColorCodingSettings.jsx` | The status-colour swatch-editor popover. |
 | `UpcomingActivities.jsx` | Forward-looking activity list, coloured by forecast-vs-baseline. |
 | `ElementDetailsDialog.jsx` | The click-to-inspect popover (dates, variance, critical flag). |
-| `InsightsPanel.jsx` | Right-hand analytics dock for 4D Simulation: project/element stats, progress by category, and a Planned-vs-Actual S-curve (a single "Planned" line when no baseline is loaded). |
+| `Split4D.jsx` | Retired — the original side-by-side comparison, superseded by `SplitCompareView.jsx`. Unimported; kept only in case any of it is wanted back. |
 
 ### 4c. Design system (`src/theme.css`)
 
@@ -89,7 +90,23 @@ One hand-written stylesheet of CSS custom properties (colour scale, type scale, 
 spacing, sharp-corner radii) that every component's inline styles reference —
 `color: 'var(--ink-700)'` etc. — so there is exactly one place that defines the
 Aarvee Engineering Consultants brand look (`#0093D2` "Aarvee Blue", PT Serif display
-type, Golos Text body). The real Aarvee logo mark lives at `src/assets/aarvee-logo.svg`.
+type, Golos Text body). The logo mark lives at `src/assets/RV.svg`.
+
+---
+
+### 4d. Dev tooling (`tools/*.mjs`)
+
+Node scripts (not bundled into the app) that exercise the IFC/schedule engine
+headlessly against local sample files: `check-bl-merge`, `check-gantt-render`,
+`check-growth`, `check-ifc-baseline`, `check-single-file`, `variance-report`.
+
+### 4e. Repository hygiene (`.gitignore`)
+
+Ignores `node_modules/`, build output (`dist/`), logs, `.env*`, editor/OS files,
+Claude Code's `.claude/settings.local.json`, Playwright artifacts, and sample model
+files (`*.ifc`, `*.ifczip`, `*.xer`) — large and may contain client data, so they stay
+local. `package-lock.json` and `public/wasm/*` **are** tracked (the lockfile pins
+versions; the WASM binaries are needed at runtime).
 
 ---
 
@@ -97,11 +114,10 @@ type, Golos Text body). The real Aarvee logo mark lives at `src/assets/aarvee-lo
 
 - **IFC2X3 / IFC4** — the model geometry, and (via `IfcScheduleTimeControl`) the
   embedded 4D schedule, read straight out of Synchro 4D Pro exports.
-- **A second, plan-only IFC** (optional) — the baseline, joined to the progressed
-  export on activity code.
+- **Primavera P6 XML** (`APIBusinessObjects` schema) — an optional, more reliable
+  baseline/actuals source than a second IFC export.
 
 ## 6. What's notably *not* in this stack
 
 No backend/API, no database, no auth, no build step beyond Vite, no design tool
-integration beyond the one-time mockup import (see `src/assets/aarvee-logo.svg`'s
-provenance) — the whole app is a static bundle that runs entirely in the browser.
+integration beyond the one-time mockup import — the whole app is a static bundle that runs entirely in the browser.

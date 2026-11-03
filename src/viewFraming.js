@@ -73,10 +73,6 @@ export function buildingFrameBox(model, excludeIds, label = "view") {
   if (box.isEmpty()) return { frame: full, full };
 
   box.applyMatrix4(model.matrixWorld);
-  const dims = (b) => b.getSize(new THREE.Vector3()).toArray()
-    .map(n => n.toFixed(1)).join(" x ");
-  console.log(`[${label}] framing on ${dims(box)} from ${kept}/${boxes.length} elements ` +
-              `(${excludeIds?.size || 0} excluded outright); full model is ${dims(full)}`);
   return { frame: box, full };
 }
 

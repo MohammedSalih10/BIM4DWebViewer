@@ -10,7 +10,7 @@
 // PlannedFinishDate -- read directly by this test, never by the app. A pass means the
 // IFC-only path lands on the same dates the XML path used to, with no XML in production.
 //
-// Harness trick: readSchedule only touches
+// Same harness trick as check-p6-merge.mjs: readSchedule only touches
 // loader.ifcManager.state.api and .idsByType, so a small fake loader drives it in Node,
 // and src/*.js is copied to .mjs because package.json is "type": "commonjs".
 import fs from "node:fs";

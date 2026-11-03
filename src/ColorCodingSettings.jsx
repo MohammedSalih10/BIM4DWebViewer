@@ -35,7 +35,7 @@ export default function ColorCodingSettings({ colors, onChange, onReset }) {
         {STATUS_ORDER.map(k => (
           <span key={k} style={{ width: 11, height: 11, background: colors[k], display: "inline-block" }} />
         ))}
-        <span style={{ fontSize: 9, color: "var(--ink-400)" }}>▾</span>
+        <span style={{ fontSize: 10.5, color: "var(--ink-400)" }}>▾</span>
       </button>
       {open && (
         <div style={{
@@ -70,13 +70,13 @@ export default function ColorCodingSettings({ colors, onChange, onReset }) {
               <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: "var(--ink-700)" }}>
                 {TASK_STATUS[k].label}
               </span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--ink-400)",
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "var(--ink-400)",
                             textTransform: "uppercase" }}>
                 {colors[k]}
               </span>
             </div>
           ))}
-          <div style={{ padding: "8px 11px", fontSize: 10.5, lineHeight: 1.45, color: "var(--ink-400)",
+          <div style={{ padding: "8px 11px", fontSize: 11.5, lineHeight: 1.45, color: "var(--ink-400)",
                         background: "var(--paper-2)" }}>
             Applies to the model, schedule bars and the Upcoming activities panel.
           </div>

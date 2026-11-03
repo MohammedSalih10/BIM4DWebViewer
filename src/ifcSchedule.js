@@ -892,7 +892,11 @@ export function elementStatusAt(schedule, date, statusFn = taskStatusAt) {
     const st = statusFn(task, date);
     if (!st || !byStatus[st]) continue;
     taskCounts[st]++;
-    if (task.elementIds.length) byStatus[st].push(...task.elementIds);
+    // Plain loop, not `push(...task.elementIds)`: this runs every playback tick, and a
+    // bulk task's (e.g. "site"/terrain) element list can run into the thousands --
+    // spreading that many args into push() is both slower than a loop and risks
+    // "Maximum call stack size exceeded" on some engines at large array sizes.
+    for (let i = 0; i < task.elementIds.length; i++) byStatus[st].push(task.elementIds[i]);
   }
   return { byStatus, taskCounts };
 }

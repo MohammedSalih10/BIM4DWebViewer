@@ -16,9 +16,21 @@ import { buildingFrameBox, frameCamera, makeShadowGround } from "./viewFraming";
 import GanttChart from "./GanttChart";
 import UpcomingActivities from "./UpcomingActivities";
 import ColorCodingSettings from "./ColorCodingSettings";
+import FloatingViewControls, { DisplayRow, DisplaySection, VpIcon, VP_ICONS } from "./ViewportControls";
 import ElementDetailsDialog from "./ElementDetailsDialog";
 import InsightsPanel from "./InsightsPanel";
 import { fetchElementDetails } from "./elementDetails";
+
+// Field-by-field compare for the status-counts object the simulation effect rebuilds
+// every playback tick -- `tasks`/`elements` are flat { [status]: count } objects keyed
+// by STATUS_ORDER, so a handful of key lookups is all a real equality check needs.
+function countsEqual(a, b) {
+  if (a.natural !== b.natural || a.builtUnique !== b.builtUnique || a.notYetBuilt !== b.notYetBuilt) return false;
+  for (const k of STATUS_ORDER) {
+    if (a.tasks[k] !== b.tasks[k] || a.elements[k] !== b.elements[k]) return false;
+  }
+  return true;
+}
 
 // "12.3 MB" etc, for the Contents panel's "Source files" footer -- the same rounding
 // App.jsx's own fmtSize uses, kept as a second copy rather than a shared import since
@@ -33,9 +45,9 @@ function fmtBytes(bytes) {
 
 // Drag-to-resize range for the Contents ("Model layers") sidebar -- mirrors
 // InsightsPanel's own MIN_W/MAX_W/DEFAULT_W so the two side panels feel consistent.
-const CONTENTS_MIN_W = 200;
+const CONTENTS_MIN_W = 220;
 const CONTENTS_MAX_W = 520;
-const CONTENTS_DEFAULT_W = 268;
+const CONTENTS_DEFAULT_W = 288;
 
 // Milliseconds between simulation frames. This is the frame RATE, not the speed --
 // speed is days-per-frame and belongs to the user, on the Gantt toolbar's -/+ control.
@@ -64,6 +76,7 @@ export default function SimpleViewer({
   sourceFiles = [],
 }) {
   const containerRef = useRef();
+  const viewportRef = useRef();   // the 3D area incl. its floating controls -- what Fullscreen expands
   const dataRef = useRef(null);   // Three.js + IFC state; deliberately NOT useState
   const edgesRef = useRef(null);   // Map<key, LineSegments> -- one outline group per task, plus "unscheduled"
   const playRef = useRef(null);
@@ -100,6 +113,8 @@ export default function SimpleViewer({
   const [statusColors, setStatusColors] = useState(DEFAULT_STATUS_COLORS);
   const [colourTerrain, setColourTerrain] = useState(false);
   const [statusCounts, setStatusCounts] = useState(null);
+  // Legend chip click = isolate that status in the 3D view (null = show everything).
+  const [statusFilter, setStatusFilter] = useState(null);
   const [noRealVariance, setNoRealVariance] = useState(false);
   // The baseline is merged by its OWN effect, so its outcome cannot live in the load
   // effect's status string. Appended to `status` when rendered.
@@ -107,6 +122,8 @@ export default function SimpleViewer({
   // Bumped when a model has finished loading and dataRef.current is fully populated.
   // The baseline effect waits on this: it needs d.loader, and effects do not await.
   const [modelEpoch, setModelEpoch] = useState(0);
+  // Bumped when the (deferred, time-sliced) edge outlines finish, so the visibility effect re-runs.
+  const [edgesEpoch, setEdgesEpoch] = useState(0);
   const [currentDate, setCurrentDate] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);              // days advanced per tick
@@ -141,6 +158,12 @@ export default function SimpleViewer({
   // one), as there is no single set of properties for "all windows".
   const [pickedDetails, setPickedDetails] = useState(null);
 
+  // Back to the defaults the toggles start with.
+  const resetDisplay = () => {
+    setShowStatusColors(true); setShowUpcoming(false); setColourTerrain(false);
+    setShowEdges(true); setShowInsights(true);
+  };
+
   // Reports the load-progress / element+schedule counts / baseline-match line up to
   // App.jsx, which renders it in the IFC upload row's blank space instead of this
   // component giving it a whole extra full-width row of its own above the viewport.
@@ -167,19 +190,21 @@ export default function SimpleViewer({
     setNoRealVariance(false); setBaseNote(""); setShowUpcoming(false);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xdfe4ea);
+    scene.background = new THREE.Color(0xdbe7f0);
 
     const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 10000);
     camera.position.set(10, 10, 10);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // At least 1.5x: on standard-density screens this supersamples, which is what makes
+    // thin edge lines and element borders read crisply instead of shimmering.
+    renderer.setPixelRatio(Math.min(Math.max(window.devicePixelRatio || 1, 1.5), 2));
     // Without this, three r149 treats the IFC's sRGB colors as linear and the
     // whole model washes out.
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
+    renderer.toneMappingExposure = 1.12;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
@@ -204,8 +229,12 @@ export default function SimpleViewer({
     let running = true;
     (function animate() {
       if (!running) return;
-      controls.update();
-      renderer.render(scene, camera);
+      // Hidden view (display:none, e.g. the other tab): keep the loop alive but skip
+      // the work -- clientWidth is 0 there, so nothing is drawn until it is shown again.
+      if (container.clientWidth && container.clientHeight) {
+        controls.update();
+        renderer.render(scene, camera);
+      }
       requestAnimationFrame(animate);
     })();
 
@@ -214,6 +243,10 @@ export default function SimpleViewer({
     (async () => {
       try {
         setStatus("Creating IFCLoader...");
+        // Let the browser paint the picked file name / status before the parse below
+        // blocks the main thread -- otherwise the page freezes the instant a file is chosen.
+        await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+        if (!running) return;
         const loader = new IFCLoader();
         await loader.ifcManager.setWasmPath("/wasm/");
 
@@ -237,8 +270,6 @@ export default function SimpleViewer({
           const mats = Array.isArray(child.material) ? child.material : [child.material];
           for (const m of mats) uniqueColors.add(m.color.getHexString());
         });
-        console.log("Colors supplied by file:", [...uniqueColors]);
-
         setStatus("Reading materials...");
         const { allIds, buckets } = await collectElements(loader, model, modelID);
 
@@ -359,12 +390,19 @@ export default function SimpleViewer({
         // traces, no per-frame recomputation needed. Elements with no task at all
         // (terrain, anything unclassified) get one more group that's always visible,
         // matching the simulation's own "not scheduled -> always drawn" rule.
+        // The edge outlines are the slowest synchronous part of a load (one createSubset +
+        // EdgesGeometry per task), and nothing needs them to show the model -- so they are
+        // built AFTER the model is on screen, in ~12ms slices, instead of before it.
+        const buildAllEdges = async () => {
         const vertCount = model.geometry?.attributes?.position?.count ?? 0;
         if (vertCount > 0 && vertCount < 3000000) {
-          const t0 = performance.now();
           const edgeGroups = new Map(); // key -> LineSegments; key is `task-<id>` or "unscheduled"
+          // Published straight away and filled in as slices finish, so the effect cleanup can
+          // dispose whatever exists if the model is swapped out mid-build.
+          edgesRef.current = edgeGroups;
+          let lastYield = performance.now();
           const edgeMaterial = () =>
-            new THREE.LineBasicMaterial({ color: 0x33383d, transparent: true, opacity: 0.5 });
+            new THREE.LineBasicMaterial({ color: 0x1f2a33, transparent: true, opacity: 0.7 });
 
           // Builds one LineSegments outline from exactly `ids`' geometry. Goes through
           // createSubset/removeSubset purely as a way to get a triangle-indexed
@@ -394,20 +432,23 @@ export default function SimpleViewer({
           if (sched?.hasSchedule) {
             for (const task of sched.tasks.values()) {
               if (task.isSummary || !task.elementIds.length) continue;
+              if (!running) return;
               buildEdgesFor(task.elementIds, `task-${task.id}`);
+              // Time-slice: hand the thread back every ~12ms so the UI keeps responding.
+              if (performance.now() - lastYield > 12) { await new Promise(r => setTimeout(r, 0)); lastYield = performance.now(); }
               for (const id of task.elementIds) scheduledIds.add(id);
             }
           }
           // Everything with no task -- the whole model when there is no schedule at all,
           // which is exactly the old single-outline behaviour in that case.
+          if (!running) return;
           buildEdgesFor(allIds.filter(id => !scheduledIds.has(id)), "unscheduled");
 
-          edgesRef.current = edgeGroups;
-          console.log(`Edges: ${edgeGroups.size} outline group(s) from ${vertCount} verts in ` +
-                      `${Math.round(performance.now() - t0)}ms`);
+          if (running) setEdgesEpoch(e => e + 1);
         } else {
           console.warn(`Skipping edges - ${vertCount} vertices is too many to outline safely.`);
         }
+        };
 
         // Frame the BUILDING, not the site. This used to fit the whole model's bounding
         // box, which on this project is 80.6 x 85.4 because of the terrain and the
@@ -418,6 +459,9 @@ export default function SimpleViewer({
           // Frame on the building, but fit the shadows to the WHOLE model -- otherwise
           // only the middle third of the terrain receives any.
           const { center, radius } = frameCamera({ camera, controls, sun }, fBox, full);
+          if (dataRef.current) {
+            dataRef.current.fitView = () => frameCamera({ camera, controls, sun }, fBox, full);
+          }
           // A shadow-catcher plane ONLY when the file has no ground of its own. With a
           // terrain present the plane catches the terrain's own shadow and draws it as
           // a second, offset footprint -- see makeShadowGround's comment.
@@ -432,6 +476,7 @@ export default function SimpleViewer({
         // Everything in dataRef.current is now populated, so the baseline effect can
         // safely reach for d.loader. It cannot simply await this effect, hence the flag.
         if (running) setModelEpoch(e => e + 1);
+        buildAllEdges();
       } catch (err) {
         console.error("IFC load failed:", err);
         if (running) setStatus("FAILED: " + (err?.message ?? String(err)));
@@ -779,7 +824,6 @@ export default function SimpleViewer({
   useEffect(() => {
     const d = dataRef.current;
     if (!d || !currentDate) return;
-    window.__DEBUG_D__ = d;
 
     const setSubset = (ids, material, customID) => {
       try {
@@ -788,9 +832,6 @@ export default function SimpleViewer({
           scene: d.scene, removePrevious: true, customID,
         });
         if (s) { s.castShadow = true; s.receiveShadow = true; }
-        console.log("DIAG setSubset", customID, "ids:", ids.length,
-          "indexCount:", s?.geometry?.index?.count, "inScene:", s ? s.parent === d.scene : null,
-          "visible:", s?.visible, "matOpacity:", material?.opacity, "matTransparent:", material?.transparent);
       } catch (e) {
         console.warn("subset update failed:", customID, e);
       }
@@ -930,9 +971,12 @@ export default function SimpleViewer({
       else hiddenCount++;           // bucket 1: simply never drawn this frame
     }
 
-    drawNatural(trueColor);
+    // Isolate: with a legend chip selected, only that status is drawn; the natural-
+    // coloured and every other status bucket are left undrawn (flush() clears them).
+    const iso = showStatusColors ? statusFilter : null;
+    drawNatural(iso ? [] : trueColor);
     if (showStatusColors) {
-      for (const k of STATUS_ORDER) drawStatus(k, shown(byStatus[k]));
+      for (const k of STATUS_ORDER) if (!iso || k === iso) drawStatus(k, shown(byStatus[k]));
     }
     // Anything not drawn this frame -- including bucket 1 -- is cleared by flush(),
     // which is what makes "not yet reached" mean "not drawn" with no extra code.
@@ -945,10 +989,16 @@ export default function SimpleViewer({
     // assigned to more than one leaf activity (it lands in two different status
     // buckets). That sum is fine for the per-status legend badges, but a "how much
     // of the model is built" total needs judged.size or it can read over 100%.
-    setStatusCounts({ tasks: taskCounts, elements: elementCounts,
-                      natural: trueColor.length, builtUnique: judged.size,
-                      notYetBuilt: hiddenCount });
-  }, [currentDate, simulate, showStatusColors, colourTerrain, schedule, showUpcoming, viewMode]);
+    // Skip the state update when nothing changed: most timeline ticks leave every
+    // count the same, and a new object would re-render the whole viewer for nothing.
+    // A manual field-by-field compare instead of JSON.stringify-ing both sides --
+    // this runs every tick, and STATUS_ORDER is tiny, so a few key lookups beat
+    // serializing two whole objects just to throw the strings away.
+    const nextCounts = { tasks: taskCounts, elements: elementCounts,
+                         natural: trueColor.length, builtUnique: judged.size,
+                         notYetBuilt: hiddenCount };
+    setStatusCounts(prev => (prev && countsEqual(prev, nextCounts)) ? prev : nextCounts);
+  }, [currentDate, simulate, showStatusColors, colourTerrain, schedule, showUpcoming, viewMode, statusFilter]);
 
   // Status materials are not tone mapped, so the scene has to be re-exposed for them:
   // under the normal 2.2-intensity sun their channels clamp and the hue shifts (green
@@ -982,7 +1032,7 @@ export default function SimpleViewer({
       const es = +(schedule.tasks.get(taskId)?.effStart || 0);
       lines.visible = showEdges && !!es && t >= es;
     }
-  }, [simulate, showEdges, viewMode, currentDate, schedule]);
+  }, [simulate, showEdges, viewMode, currentDate, schedule, edgesEpoch]);
 
   // Playback: advance `speed` days per tick until the end of the schedule.
   //
@@ -1078,17 +1128,25 @@ export default function SimpleViewer({
 
   // Keeps a branch if its own label matches (then the whole branch stays, so you can
   // still see what is inside "Walls") or if anything below it matches.
-  function filterTree(nodes) {
-    if (!q) return nodes;
-    const out = [];
-    for (const n of nodes) {
-      if (n.label.toLowerCase().includes(q)) { out.push(n); continue; }
-      const kids = filterTree(n.children);
-      if (kids.length) out.push({ ...n, children: kids });
+  //
+  // Memoized: `roots`/`q` only change on a real Contents interaction (load, group-by
+  // toggle, search keystroke), never on a `currentDate` tick -- but without this, the
+  // whole category/level tree was re-walked and every node's JSX rebuilt on every
+  // single playback tick (several times a second), for a panel that wasn't even
+  // changing.
+  const visibleRoots = useMemo(() => {
+    function filterTree(nodes) {
+      if (!q) return nodes;
+      const out = [];
+      for (const n of nodes) {
+        if (n.label.toLowerCase().includes(q)) { out.push(n); continue; }
+        const kids = filterTree(n.children);
+        if (kids.length) out.push({ ...n, children: kids });
+      }
+      return out;
     }
-    return out;
-  }
-  const visibleRoots = filterTree(roots);
+    return filterTree(roots);
+  }, [roots, q]);
 
   // A Set for O(1) membership below. Selections that come from the Gantt or a 3D
   // click carry ids that don't equal any single tree node's own `ids` array (a task
@@ -1150,120 +1208,6 @@ export default function SimpleViewer({
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--paper-3)" }}>
-      {/* Toolbar: counts, the status legend, visibility flags and the colour-swatch
-          popover, all in one row -- matching the mockup's combined legend/toolbar bar. */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 18, padding: "8px 20px",
-        background: "var(--paper-2)", borderBottom: "1px solid var(--line-soft)",
-        flexShrink: 0, flexWrap: "wrap",
-      }}>
-        {contents && (
-          <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 12,
-                        color: "var(--ink-600)", fontFamily: "var(--font-mono)" }}>
-            <span><strong style={{ color: "var(--ink-700)" }}>{contents.total}</strong> elements</span>
-            <span>{contents.categoryTree.length} categories</span>
-            {viewMode === "4d" && schedule?.hasSchedule && (
-              <>
-                <span><strong style={{ color: "var(--ink-700)" }}>{schedule.tasks.size}</strong> tasks</span>
-                <span>{schedule.links.length} links</span>
-                <span>
-                  <strong style={{ color: "var(--status-delayed)" }}>{schedule.criticalIds.size}</strong> on critical path
-                </span>
-              </>
-            )}
-          </div>
-        )}
-
-        {viewMode === "4d" && simulate && showStatusColors && statusCounts && (
-          <>
-            <div style={{ width: 1, height: 20, background: "var(--line-soft)" }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              {STATUS_ORDER.map(k => (
-                <span key={k} style={{
-                  display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5,
-                  padding: "5px 10px", border: "1px solid var(--aar-blue)", background: "var(--aar-blue-fog)",
-                  color: "var(--ink-600)", whiteSpace: "nowrap",
-                }}>
-                  <span style={{ width: 8, height: 8, background: statusColors[k], display: "inline-block" }} />
-                  {TASK_STATUS[k].label}
-                  <strong style={{ color: "var(--ink-700)" }}>{statusCounts.tasks?.[k] ?? 0}</strong>
-                  <span style={{ color: "var(--ink-400)" }}>({statusCounts.elements?.[k] ?? 0} el)</span>
-                </span>
-              ))}
-            </div>
-            {noRealVariance && (
-              <span style={{ fontSize: 11.5, color: "var(--status-ahead)" }}>
-                No slipped activity in this file owns geometry, so all-green is correct.
-              </span>
-            )}
-          </>
-        )}
-
-        <div style={{ flex: 1 }} />
-
-        <div style={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
-          {/* No standalone "4D simulation" toggle -- pressing Play or scrubbing the
-              Gantt's timeline already turns `simulate` on (see togglePlay and the
-              GanttChart onDateChange handler below), so the checkbox was a second,
-              redundant way to do the same thing. There is now no UI to turn `simulate`
-              back OFF once it starts; if that turns out to matter, it belongs here.
-              Colour coding / Colour terrain no longer wait on `simulate` either -- with
-              three windows now (3D View, 4D Simulation, Planned vs Actual) it reads
-              oddly for these to only appear once Play has been pressed, so they're set
-              up front and just take effect the moment the build-up actually starts. */}
-          {viewMode === "4d" && (
-            <Flag
-              label="Colour coding" checked={showStatusColors} onChange={setShowStatusColors} fontSize={13}
-              title="ON = work is tinted red/green/yellow/blue by its traffic-light status -- actual dates once recorded, and (with a baseline loaded) expected/forecast dates before that, each judged against the baseline. OFF = the build-up still grows on schedule, but every element just keeps its own material colour -- nothing is judged."
-            />
-          )}
-
-          {viewMode === "4d" && showStatusColors && (
-            <ColorCodingSettings
-              colors={statusColors}
-              onChange={(k, v) => setStatusColors(prev => ({ ...prev, [k]: v }))}
-              onReset={() => setStatusColors(DEFAULT_STATUS_COLORS)}
-            />
-          )}
-
-          {viewMode === "4d" && schedule?.hasSchedule && (
-            <Flag
-              label="Upcoming activities" checked={showUpcoming} onChange={setShowUpcoming} fontSize={13}
-              title="Shows current and future activities. The panel colours forecast dates against BL Start/Finish: red delayed, green on time, yellow ahead, blue in progress. With Colour coding on, it also applies the same baseline comparison in the 3D view."
-            />
-          )}
-          {viewMode === "4d" && (
-            <Flag
-              label="Colour terrain" checked={colourTerrain} onChange={setColourTerrain} fontSize={13}
-              title="The terrain is one 80x85m element owned by the excavation activity, so colouring it hides the building behind a status-coloured sheet. Off = it stays its natural olive; the legend counts still include it."
-            />
-          )}
-          {/* Shown in every mode now -- Edges tracks the build-up per task (see the
-              visibility effect above), so it's no longer something 4D Simulation has
-              to hide or override while playing; same checkbox everywhere, matching
-              Planned vs Actual's toolbar. */}
-          <Flag label="Edges" checked={showEdges} onChange={setShowEdges} fontSize={13} />
-
-          {viewMode === "4d" && schedule?.hasSchedule && (
-            <Flag
-              label="Insights" checked={showInsights} onChange={setShowInsights} fontSize={13}
-              title="A right-hand panel of project/task metrics, progress by category and a Planned-vs-Actual S-curve -- see InsightsPanel.jsx."
-            />
-          )}
-
-          <label
-            title="The colour used to pick out whatever is selected -- a Contents panel node, or a clicked Gantt/Upcoming task. Everything else stays in its own colour; only the selected elements get this overlay."
-            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--ink-600)",
-                     padding: "5px 9px", cursor: "pointer" }}
-          >
-            <input type="color" value={highlightColor} onChange={e => setHighlightColor(e.target.value)}
-                   style={{ width: 22, height: 18, padding: 0, border: "1px solid var(--line-strong)",
-                            background: "none", cursor: "pointer" }} />
-            Highlight
-          </label>
-        </div>
-      </div>
-
       {/* The Contents sidebar sits beside the 3D view, directly above the Gantt chart --
           a proper flex column now (not a floating overlay), matching the mockup. */}
       <div style={{ flex: 1, minHeight: 0, display: "flex", minWidth: 0 }}>
@@ -1281,7 +1225,7 @@ export default function SimpleViewer({
               style={{
                 position: "absolute", right: -3, top: 0, bottom: 0, width: 6,
                 cursor: "col-resize", zIndex: 2,
-                background: contentsResizing ? "rgba(0,147,210,.5)" : "transparent",
+                background: contentsResizing ? "rgba(63,110,140,.5)" : "transparent",
               }}
             />
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -1292,7 +1236,7 @@ export default function SimpleViewer({
                   Model layers
                 </span>
                 {contents && (
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--ink-400)" }}>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "var(--ink-400)" }}>
                     {visibleRoots.reduce((n, r) => n + r.count, 0)} shown
                   </span>
                 )}
@@ -1329,7 +1273,7 @@ export default function SimpleViewer({
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search elements…"
                 style={{ width: "100%", fontFamily: "inherit", fontSize: 12, padding: "7px 9px",
-                        border: "1px solid var(--line-strong)", background: "#fff", color: "var(--ink-700)",
+                        border: "1px solid var(--line-strong)", background: "var(--paper)", color: "var(--ink-700)",
                         outline: "none" }}
               />
               {selected && (
@@ -1354,7 +1298,7 @@ export default function SimpleViewer({
             </div>
 
             {contents && contents.classified < contents.total && (
-              <div style={{ padding: "8px 12px", borderTop: "1px solid var(--line-soft)", fontSize: 10.5,
+              <div style={{ padding: "8px 12px", borderTop: "1px solid var(--line-soft)", fontSize: 11.5,
                             lineHeight: 1.45, color: "var(--ink-400)", background: "var(--paper-2)" }}>
                 {contents.total - contents.classified} of {contents.total} elements could not
                 be identified from the file and sit under Generic Models.
@@ -1368,7 +1312,7 @@ export default function SimpleViewer({
             {sourceFiles.length > 0 && (
               <div style={{ padding: "9px 12px", borderTop: "1px solid var(--line-soft)",
                             background: "var(--paper-2)" }}>
-                <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: "0.08em",
+                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em",
                               textTransform: "uppercase", color: "var(--ink-400)", marginBottom: 7 }}>
                   Source files
                 </div>
@@ -1383,9 +1327,109 @@ export default function SimpleViewer({
             of this row (down past the Gantt too), matching the mockup's layout
             instead of the Gantt spanning the whole window width below everything. */}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <div style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, background: "var(--paper-4)",
-                      overflow: "hidden" }}>
+        <div ref={viewportRef} style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0,
+                      background: "var(--paper-4)", overflow: "hidden" }}>
           <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
+
+          {/* Floating view controls: one compact toolbar (Display, Fit view, Fullscreen)
+              top-right, with every visibility toggle in its popover -- replaces the
+              full-width toolbar row that used to sit above the viewport. */}
+          <FloatingViewControls
+            onReset={resetDisplay} fullscreenRef={viewportRef}
+            onFit={() => dataRef.current?.fitView?.()}
+          >
+                {viewMode === "4d" && (
+                  <DisplaySection label="Colour">
+                    <DisplayRow
+                      icon={VP_ICONS.palette} label="Colour coding" checked={showStatusColors}
+                      onChange={setShowStatusColors}
+                      title="ON = work is tinted red/green/yellow/blue by its traffic-light status -- actual dates once recorded, and (with a baseline loaded) expected/forecast dates before that, each judged against the baseline. OFF = the build-up still grows on schedule, but every element just keeps its own material colour -- nothing is judged."
+                    />
+                    {showStatusColors && (
+                      <div className="vp-sub">
+                        <ColorCodingSettings
+                          colors={statusColors}
+                          onChange={(k, v) => setStatusColors(prev => ({ ...prev, [k]: v }))}
+                          onReset={() => setStatusColors(DEFAULT_STATUS_COLORS)}
+                        />
+                      </div>
+                    )}
+                    {schedule?.hasSchedule && (
+                      <DisplayRow
+                        icon={VP_ICONS.calendar} label="Upcoming activities" checked={showUpcoming}
+                        onChange={setShowUpcoming}
+                        title="Shows current and future activities. The panel colours forecast dates against BL Start/Finish: red delayed, green on time, yellow ahead, blue in progress. With Colour coding on, it also applies the same baseline comparison in the 3D view."
+                      />
+                    )}
+                  </DisplaySection>
+                )}
+
+                <DisplaySection label="Scene">
+                  {viewMode === "4d" && (
+                    <DisplayRow
+                      icon={VP_ICONS.mountain} label="Colour terrain" checked={colourTerrain}
+                      onChange={setColourTerrain}
+                      title="The terrain is one 80x85m element owned by the excavation activity, so colouring it hides the building behind a status-coloured sheet. Off = it stays its natural olive; the legend counts still include it."
+                    />
+                  )}
+                  <DisplayRow icon={VP_ICONS.box} label="Edges" checked={showEdges} onChange={setShowEdges} />
+                </DisplaySection>
+
+                <DisplaySection label="Overlays">
+                  {viewMode === "4d" && schedule?.hasSchedule && (
+                    <DisplayRow
+                      icon={VP_ICONS.chart} label="Insights" checked={showInsights} onChange={setShowInsights}
+                      title="A right-hand panel of project/task metrics, progress by category and a Planned-vs-Actual S-curve -- see InsightsPanel.jsx."
+                    />
+                  )}
+                  <label className="vp-row"
+                         title="The colour used to pick out whatever is selected -- a Contents panel node, or a clicked Gantt/Upcoming task. Everything else stays in its own colour; only the selected elements get this overlay.">
+                    <VpIcon d={VP_ICONS.highlighter} color="var(--ink-300)" />
+                    <span className="vp-row-label">Highlight colour</span>
+                    <input type="color" value={highlightColor} onChange={e => setHighlightColor(e.target.value)}
+                           className="vp-color" />
+                  </label>
+                </DisplaySection>
+          </FloatingViewControls>
+
+          {/* Status legend / isolate filter: floats top-left, clear of the Display toolbar. */}
+          {viewMode === "4d" && simulate && showStatusColors && statusCounts && (
+            <div className="vp-legend" style={{ left: showContents ? 12 : 104 }}>
+              {STATUS_ORDER.map(k => {
+                const active = statusFilter === k;
+                return (
+                  <button
+                    key={k}
+                    onClick={() => setStatusFilter(active ? null : k)}
+                    title={active
+                      ? "Showing only this status in the 3D view. Click to show everything again."
+                      : `Click to show only "${TASK_STATUS[k].label}" elements in the 3D view. ` +
+                        `${statusCounts.elements?.[k] ?? 0} elements.`}
+                    className={"fchip" + (active ? " active" : statusFilter ? " dim" : "")}
+                    style={{ "--c": statusColors[k] }}
+                  >
+                    <span style={{ width: 10, height: 10, background: statusColors[k], borderRadius: 2,
+                                   display: "inline-block" }} />
+                    {TASK_STATUS[k].label}
+                    <strong>{statusCounts.tasks?.[k] ?? 0}</strong>
+                    <span style={{ color: "var(--ink-400)" }}>({statusCounts.elements?.[k] ?? 0} el)</span>
+                  </button>
+                );
+              })}
+              {statusFilter && (
+                <button className="fchip" onClick={() => setStatusFilter(null)}
+                        title="Show all statuses again" style={{ "--c": "var(--aar-blue)" }}>
+                  Clear ✕
+                </button>
+              )}
+              {noRealVariance && (
+                <span style={{ fontSize: 11.5, color: "var(--status-ahead)", whiteSpace: "nowrap" }}
+                      title="No slipped activity in this file owns geometry, so all-green is correct.">
+                  All on plan ⓘ
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Reopens Contents once its own panel has been closed. Hidden while the
               panel is open so there's only ever one way to toggle it at a time. */}
@@ -1396,7 +1440,7 @@ export default function SimpleViewer({
               style={{
                 position: "absolute", left: 12, top: 12, zIndex: 6, fontFamily: "inherit", fontSize: 12,
                 fontWeight: 500, padding: "8px 12px", cursor: "pointer",
-                background: "rgba(255,255,255,.86)", backdropFilter: "blur(20px)",
+                background: "var(--paper)",
                 border: "1px solid var(--line-soft)", color: "var(--ink-700)",
               }}
             >
@@ -1408,10 +1452,10 @@ export default function SimpleViewer({
           {viewMode === "4d" && simulate && currentDate && (
             <div style={{
               position: "absolute", left: 12, bottom: 12, display: "flex", alignItems: "center", gap: 10,
-              padding: "8px 12px", background: "rgba(255,255,255,.9)", backdropFilter: "blur(20px)",
+              padding: "8px 12px", background: "var(--paper)",
               border: "1px solid var(--line-soft)",
             }}>
-              <span style={{ fontSize: 10.5, letterSpacing: "0.08em", textTransform: "uppercase",
+              <span style={{ fontSize: 11.5, letterSpacing: "0.08em", textTransform: "uppercase",
                             color: "var(--ink-400)" }}>
                 Simulation date
               </span>
@@ -1432,8 +1476,8 @@ export default function SimpleViewer({
 
           {viewMode === "4d" && showUpcoming && schedule?.hasSchedule && (
             <div style={{
-              position: "absolute", right: 12, top: 12, maxHeight: "calc(100% - 24px)", width: 292,
-              overflow: "auto", background: "rgba(255,255,255,.92)", backdropFilter: "blur(24px)",
+              position: "absolute", right: 12, top: 60, maxHeight: "calc(100% - 72px)", width: 292,
+              overflow: "auto", background: "var(--paper)",
               border: "1px solid var(--line-soft)", boxShadow: "var(--elev-2)", display: "flex",
               flexDirection: "column", zIndex: 5,
             }}>
@@ -1492,7 +1536,7 @@ export default function SimpleViewer({
                 style={{
                   position: "absolute", top: "50%", left: "50%",
                   transform: "translate(-50%, -50%)",
-                  width: 44, height: 15, lineHeight: 1, fontSize: 9,
+                  width: 44, height: 15, lineHeight: 1, fontSize: 10.5,
                   display: "flex", alignItems: "center", justifyContent: "center",
                   cursor: "pointer", padding: 0, borderRadius: 2,
                   border: "1px solid var(--line-strong)", background: "var(--paper)",
@@ -1561,7 +1605,7 @@ function SourceFileRow({ label, dotColor, file, accept, onPick, onClear, tooltip
           {file?.name || label}
         </div>
         {file?.name && (
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--ink-400)" }}>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--ink-400)" }}>
             {fmtBytes(file.size)}
           </div>
         )}
@@ -1569,7 +1613,7 @@ function SourceFileRow({ label, dotColor, file, accept, onPick, onClear, tooltip
       <input ref={inputRef} type="file" accept={accept} onChange={onPick} style={{ display: "none" }} />
       <button
         onClick={() => inputRef.current.click()} title={file?.name ? "Replace" : "Choose"}
-        style={{ fontFamily: "inherit", fontSize: 10, fontWeight: 500, padding: "3px 7px", cursor: "pointer",
+        style={{ fontFamily: "inherit", fontSize: 11, fontWeight: 500, padding: "3px 7px", cursor: "pointer",
                  background: "var(--paper)", color: "var(--ink-700)", border: "1px solid var(--line-strong)",
                  flexShrink: 0 }}
       >
@@ -1585,28 +1629,5 @@ function SourceFileRow({ label, dotColor, file, accept, onPick, onClear, tooltip
         </button>
       )}
     </div>
-  );
-}
-
-// One visibility toggle, styled as a checkbox chip -- the same pattern the mockup uses
-// for "4D simulation" / "Colour coding" / "Upcoming activities" etc.
-function Flag({ label, checked, onChange, title, fontSize = 11.5 }) {
-  return (
-    <label
-      title={title}
-      style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize, padding: "5px 9px",
-               cursor: "pointer", color: "var(--ink-600)", whiteSpace: "nowrap" }}
-    >
-      <span style={{
-        width: 13, height: 13, display: "grid", placeItems: "center", fontSize: 9, lineHeight: 1,
-        background: checked ? "var(--aar-blue)" : "var(--paper)",
-        border: "1px solid " + (checked ? "var(--aar-blue)" : "var(--line-strong)"), color: "#fff",
-      }}>
-        {checked ? "✓" : ""}
-      </span>
-      {label}
-      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
-             style={{ display: "none" }} />
-    </label>
   );
 }

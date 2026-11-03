@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { TASK_STATUS } from "./ifcSchedule";
 
 const STATUS_ORDER = ["delayed", "onTime", "ahead", "inProgress"];
@@ -35,25 +35,33 @@ function upcomingStatus(task, hasBaseline) {
  */
 export default function UpcomingActivities({ schedule, asOf, selectedTaskId, onSelectTask,
                                             statusColors, limit = 30 }) {
-  if (!schedule?.hasSchedule || !asOf) return null;
+  // Memoized, and hoisted above the early return below so the hook itself always
+  // runs (React hooks can't follow a conditional return). Without this, every render
+  // of this panel -- including every ~120ms playback tick while it's open -- rescanned,
+  // mapped, filtered and sorted the WHOLE task list from scratch, even on ticks where
+  // the upcoming list hadn't actually changed.
+  const upcoming = useMemo(() => {
+    if (!schedule?.hasSchedule || !asOf) return [];
+    const t = +asOf;
+    return [...schedule.tasks.values()]
+      .filter(task => !task.isSummary && !task.actualFinish)
+      .map(task => {
+        if (task.actualStart) return { task, start: +task.actualStart, status: "inProgress" };
+        const start = +(task.effStart || task.start || 0);
+        if (!start || start <= t) return null;
+        return { task, start, status: upcomingStatus(task, schedule.hasBaseline) };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.start - b.start)
+      .slice(0, limit);
+  }, [schedule, asOf, limit]);
 
-  const t = +asOf;
-  const upcoming = [...schedule.tasks.values()]
-    .filter(task => !task.isSummary && !task.actualFinish)
-    .map(task => {
-      if (task.actualStart) return { task, start: +task.actualStart, status: "inProgress" };
-      const start = +(task.effStart || task.start || 0);
-      if (!start || start <= t) return null;
-      return { task, start, status: upcomingStatus(task, schedule.hasBaseline) };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.start - b.start)
-    .slice(0, limit);
+  if (!schedule?.hasSchedule || !asOf) return null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px", flexWrap: "wrap",
-                    fontSize: 10.5, color: "var(--ink-600)", borderBottom: "1px solid var(--paper-cool)",
+                    fontSize: 11.5, color: "var(--ink-600)", borderBottom: "1px solid var(--paper-cool)",
                     flexShrink: 0 }}>
         <span style={{ color: "var(--ink-400)" }}>Forecast vs BL</span>
         {STATUS_ORDER.map(key => (
@@ -89,7 +97,7 @@ export default function UpcomingActivities({ schedule, asOf, selectedTaskId, onS
                              background: status ? statusColor(status, statusColors) : "var(--ink-300)",
                              display: "inline-block" }} />
               {task.code && (
-                <span style={{ color: "var(--ink-400)", fontFamily: "var(--font-mono)", fontSize: 10,
+                <span style={{ color: "var(--ink-400)", fontFamily: "var(--font-mono)", fontSize: 11,
                                flexShrink: 0 }}>
                   {task.code}
                 </span>
@@ -98,11 +106,11 @@ export default function UpcomingActivities({ schedule, asOf, selectedTaskId, onS
                              textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {task.name}
               </span>
-              <span style={{ color: "var(--ink-400)", fontFamily: "var(--font-mono)", fontSize: 10 }}>
+              <span style={{ color: "var(--ink-400)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
                 {fmt(task.effStart || task.start)}
               </span>
               <span style={{ color: status ? statusColor(status, statusColors) : "var(--ink-400)",
-                             fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap",
+                             fontWeight: 600, fontSize: 11.5, whiteSpace: "nowrap",
                              textAlign: "right", flexShrink: 0 }}>
                 {statusLabel}
               </span>

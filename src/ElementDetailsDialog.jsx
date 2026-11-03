@@ -35,7 +35,8 @@ export default function ElementDetailsDialog({ details, onClose, placement = "bo
       }}>
         <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid var(--line-soft)", display: "flex",
                       justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-          <span style={{ fontWeight: 600, fontSize: 15, color: "var(--ink-700)" }}>Element Details</span>
+          <span style={{ fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 15, lineHeight: 1.2,
+                        color: "var(--ink-700)" }}>Element Details</span>
           <button
             onClick={onClose} title="Close"
             style={{ fontFamily: "inherit", fontSize: 14, background: "transparent", border: 0,
@@ -75,7 +76,8 @@ export default function ElementDetailsDialog({ details, onClose, placement = "bo
               else to head the dialog with. */}
           <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}
                title={task ? task.name : name}>
-            <span style={{ fontWeight: 600, fontSize: 14.5, color: "var(--ink-700)", overflow: "hidden",
+            <span style={{ fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 14.5, lineHeight: 1.2,
+                          color: "var(--ink-700)", overflow: "hidden",
                           textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {task ? task.name : name}
             </span>

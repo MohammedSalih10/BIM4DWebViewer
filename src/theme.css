@@ -1,64 +1,97 @@
 /* ============================================================
    Aarvee Engineering Consultants -- design tokens
    Ported from the "4D BIM Viewer" mockup (Aarvee Deliverables /
-   Figma). Primary brand color: #0093D2 ("Aarvee Blue").
+   Figma). Light indigo theme (was Aarvee Blue #0093D2).
 
    Every component's inline styles reference these as CSS custom
    properties (e.g. `color: 'var(--ink-700)'`), the same pattern
    the mockup itself used, so there is exactly one place that
-   defines "what Aarvee Blue is" for the whole app.
+   defines the accent colour for the whole app.
    ============================================================ */
 
-/* Golos Text (body) and PT Serif (headings) -- the mockup's own custom display
-   faces ("Aarvee BT"/"Aarvee Demi") are commercial and not shipped here; PT Serif
-   plus the system serif stack stands in for them everywhere --font-display is used. */
+/* Golos Text (body) -- matches the body font aarvee.com itself uses ("Golos 400"/
+   "Golos 500" in its stylesheet), so no substitution needed there.
+   Ivyoradisplay (headings/wordmark) is aarvee.com's own display face, self-hosted
+   below (Regular + Medium only -- @font-face block further down) since it isn't on
+   Google Fonts; PT Serif is the fallback for anyone missing those woff2 files.
+   aarvee.com sets its headings at font-weight 400-500 (never bold) with ~120%
+   line-height; --font-display/--font-logo follow the same convention wherever used. */
 @import url("https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=PT+Serif:ital,wght@0,400;0,700;1,400&display=swap");
 
+/* Ivyoradisplay itself -- self-hosted (not hotlinked to aarvee.com's CDN) so the
+   wordmark doesn't depend on their Webflow asset URLs staying put. Only the two
+   weights the "4D BIM Web Viewer" wordmark actually uses are shipped. */
+@font-face {
+  font-family: "Ivyoradisplay";
+  src: url("./assets/fonts/IvyOraDisplay-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Ivyoradisplay";
+  src: url("./assets/fonts/IvyOraDisplay-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Ivyoradisplay";
+  src: url("./assets/fonts/IvyOraDisplay-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  /* --- Brand primaries (Aarvee Blue family) ---------------- */
-  --aar-blue:        #0093D2;
-  --aar-blue-deep:   #006A92;
-  --aar-blue-mid:    #408CA5;
-  --aar-blue-bright: #00AAE5;
-  --aar-blue-tint:   #E1EDF1;
-  --aar-blue-haze:   #D8EDF5;
-  --aar-blue-fog:    #E6F4FB;
+  /* NOTE: the --aar-blue-* names are kept so every component keeps working,
+     but the VALUES are now a mineral blue theme (was indigo, originally Aarvee Blue #0093D2). */
+  --aar-blue:        #2F6A94;
+  --aar-blue-deep:   #1F4A6A;
+  --aar-blue-mid:    #5A8DAE;
+  --aar-blue-bright: #3F82B0;
+  --aar-blue-tint:   #D3E5F1;
+  --aar-blue-haze:   #C2DAEA;
+  --aar-blue-fog:    #E1EEF6;
+  --accent-rgb:      47, 106, 148;
+  --accent-grad:     #2F6A94;   /* flat on purpose -- no gradient fills */
 
-  /* --- Ink (deep navy default text) ------------------------- */
-  --ink-900: #00182F;
-  --ink-800: #00212D;
-  --ink-700: #0B2038;
-  --ink-600: #2E4459;
-  --ink-500: #445A6E;
-  --ink-400: #5B636B;
-  --ink-300: #7C8894;
+  /* --- Ink (deep blue-slate text) --------------------------- */
+  --ink-900: #0A1A25;
+  --ink-800: #10242F;
+  --ink-700: #132B3A;
+  --ink-600: #2A4352;
+  --ink-500: #3F586A;
+  --ink-400: #566E80;
+  --ink-300: #7C92A2;
 
-  /* --- Neutrals ---------------------------------------------- */
-  --paper:       #FFFFFF;
-  --paper-2:     #F6F6F6;
-  --paper-3:     #EAEBED;
-  --paper-4:     #E7EAED;
-  --paper-cool:  #ECEDEF;
-  --line-soft:   #E2E7E9;
-  --line:        #D0D1D2;
-  --line-strong: #CCD3D6;
+  /* --- Surfaces: mineral-tinted, no pure white ---------------
+     page < panel < bar/header < hover. paper-3 is the page behind
+     the panels, paper the panels themselves. */
+  --paper:       #F2F6F9;
+  --paper-2:     #E8EFF4;
+  --paper-3:     #DCE6ED;
+  --paper-4:     #D2DFE8;
+  --paper-cool:  #DFE9EF;
+  --line-soft:   #C9D8E3;
+  --line:        #B6C9D7;
+  --line-strong: #9DB4C5;
 
   /* --- Status (traffic-light) colours ------------------------ */
-  --status-delayed:  #F0353D;
-  --status-progress: #0093D2;
-  --status-ontime:   #1FA85C;
+  --status-delayed:  #E5262F;
+  --status-progress: #2F6A94;
+  --status-ontime:   #14994F;
   --status-ahead:    #E8A33D;
   --status-baseline: var(--ink-300);
 
   /* --- Type ---------------------------------------------------- */
-  --font-display: "PT Serif", "Times New Roman", serif;
+  --font-display: "Ivyoradisplay", "PT Serif", "Times New Roman", serif;
   --font-body:    "Golos Text", -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono:    ui-monospace, "SFMono-Regular", Menlo, monospace;
-  /* Taberna (Latinotype) is the dedicated wordmark face for the "4D BIM Viewer"
-     logotype -- a commercial display font, not bundled/imported here (it isn't
-     on Google Fonts), so it only takes effect if installed locally; PT Serif
-     is the fallback everywhere else. */
-  --font-logo:    "Taberna", "PT Serif", "Times New Roman", serif;
+  /* Ivyoradisplay -- aarvee.com's own display face, self-hosted above (Regular/
+     Medium only) specifically for the "4D BIM Web Viewer" wordmark; PT Serif is
+     the fallback for anyone missing the woff2 files, same stack as --font-display. */
+  --font-logo:    "Ivyoradisplay", "PT Serif", "Times New Roman", serif;
 
   /* --- Wordmark accent -- flat black for the "4D BIM Viewer" mark only,
        so it doesn't reuse --aar-blue-deep (already spread across the
@@ -69,15 +102,18 @@
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px;
   --s-6: 32px; --s-7: 48px; --s-8: 64px;
 
-  /* --- Radii -- Aarvee designs are sharp; 0 by default -------- */
+  /* --- Radii (softened from the old sharp corners) ------------ */
   --r-0: 0;
-  --r-sm: 2px;
-  --r-md: 4px;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
 
-  /* --- Elevation ---------------------------------------------- */
-  --elev-1: 0 1px 2px rgba(0, 33, 45, 0.06), 0 1px 1px rgba(0, 33, 45, 0.04);
-  --elev-2: 0 6px 18px rgba(0, 33, 45, 0.08);
-  --elev-3: 0 18px 40px rgba(0, 33, 45, 0.14);
+  /* --- Elevation (indigo-tinted shadows) ---------------------- */
+  --elev-1: 0 1px 1px rgba(27, 52, 68, 0.06);
+  --elev-2: 0 4px 12px rgba(27, 52, 68, 0.09);
+  --elev-3: 0 10px 28px rgba(27, 52, 68, 0.14);
+
+  --ease: cubic-bezier(.2, .8, .2, 1);
 }
 
 html, body, #root { height: 100%; margin: 0; }
@@ -86,17 +122,166 @@ body {
   font-family: var(--font-body);
   background: var(--paper-3);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "tnum" 1, "cv11" 1;
 }
 * { box-sizing: border-box; }
 
 input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; }
-input[type=range]::-webkit-slider-runnable-track { height: 4px; background: var(--line-strong); }
+input[type=range]::-webkit-slider-runnable-track { height: 4px; background: var(--line-strong); border-radius: 4px; }
 input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px;
   background: var(--aar-blue); border: 2px solid var(--paper);
-  box-shadow: 0 1px 3px rgba(0, 33, 45, .35); border-radius: 50%; cursor: pointer;
+  box-shadow: 0 0 0 1px var(--aar-blue-deep); border-radius: 50%; cursor: pointer;
+  transition: transform .15s var(--ease), box-shadow .15s var(--ease);
 }
+input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+input[type=range]:active::-webkit-slider-thumb { transform: scale(1.1); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--line-strong); }
-::-webkit-scrollbar-track { background: var(--paper-2); }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--aar-blue-mid); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ============================================================
+   Dynamic interaction layer. Components style inline, which can't
+   express :hover/:active/:focus, so these global rules add them using
+   properties the inline styles don't set (box-shadow, filter, the
+   `translate` property -- separate from `transform`, which a few
+   buttons already use for centring).
+   ============================================================ */
+button, input, select, textarea { border-radius: var(--r-sm); }
+button {
+  transition: box-shadow .18s var(--ease), translate .18s var(--ease),
+              filter .18s var(--ease), background-color .18s var(--ease), color .18s var(--ease);
+}
+button:not(:disabled):hover {
+  /* inset "tint" works over any background, including transparent ones */
+  box-shadow: inset 0 0 0 999px rgba(var(--accent-rgb), .08);
+}
+button:not(:disabled):active {
+  box-shadow: inset 0 0 0 999px rgba(var(--accent-rgb), .16);
+  translate: 0 0;
+  filter: brightness(.97);
+}
+button:disabled { filter: grayscale(.4); }
+
+input:not([type=range]):not([type=file]), select, textarea {
+  transition: border-color .18s var(--ease), box-shadow .18s var(--ease), background-color .18s var(--ease);
+}
+input:not([type=range]):hover, select:hover, textarea:hover { border-color: var(--aar-blue-mid) !important; }
+input:not([type=range]):focus, select:focus, textarea:focus {
+  border-color: var(--aar-blue) !important;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .18);
+}
+:focus-visible { outline: 2px solid var(--aar-blue); outline-offset: 2px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
+
+aside, header, footer { transition: box-shadow .2s var(--ease); }
+
+@keyframes fadeInUp { from { opacity: 0; translate: 0 6px; } to { opacity: 1; translate: 0 0; } }
+[data-status-popover] { animation: fadeInUp .18s var(--ease); border-radius: var(--r-md); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* ============================================================
+   Toggle pills (Flag) and legend filter chips (status legend).
+   ============================================================ */
+.tog {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 8px; padding: 4px 11px 4px 6px;
+  border: 1px solid var(--line); border-radius: 999px; background: transparent;
+  color: var(--ink-500); cursor: pointer; white-space: nowrap; user-select: none;
+  transition: background-color .18s var(--ease), border-color .18s var(--ease), color .18s var(--ease);
+}
+.tog .trk {
+  width: 24px; height: 14px; border-radius: 7px; background: var(--line-strong);
+  position: relative; flex-shrink: 0; transition: background-color .18s var(--ease);
+}
+.tog .trk::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px;
+  border-radius: 50%; background: var(--paper); transition: transform .18s var(--ease);
+}
+.tog.on { background: var(--aar-blue-tint); border-color: var(--aar-blue); color: var(--aar-blue-deep); font-weight: 600; }
+.tog.on .trk { background: var(--aar-blue); }
+.tog.on .trk::after { transform: translateX(10px); }
+/* The label reserves its BOLD width (hidden bold copy underneath) so the pill is the
+   same size on or off -- the right-aligned toolbar never shifts when a toggle flips. */
+.tog .lbl { display: inline-flex; flex-direction: column; align-items: center; }
+.tog .lbl::after {
+  content: attr(data-label); font-weight: 600; height: 0; overflow: hidden;
+  visibility: hidden; pointer-events: none;
+}
+.tog:hover { border-color: var(--aar-blue); }
+
+.fchip {
+  display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px 5px 9px;
+  border: 1px solid var(--line); background: var(--paper); border-radius: var(--r-sm);
+  color: var(--ink-600); font-family: inherit; font-size: 11.5px; white-space: nowrap; cursor: pointer;
+  transition: border-color .18s var(--ease), background-color .18s var(--ease), opacity .18s var(--ease);
+}
+.fchip strong { color: var(--ink-700); font-variant-numeric: tabular-nums; }
+.fchip:hover { border-color: var(--c); }
+.fchip.active {
+  background: color-mix(in srgb, var(--c) 14%, var(--paper)); border-color: var(--c);
+  color: var(--ink-900); box-shadow: inset 0 -2px 0 var(--c);
+}
+.fchip.dim { opacity: .5; }
+
+/* --- Floating viewport controls (SimpleViewer) ------------------------- */
+.vp-toolbar {
+  display: flex; align-items: center; gap: 2px; padding: 4px;
+  background: rgba(255,255,255,.93); border: 1px solid var(--line-soft); border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(31,58,77,.12);
+}
+.vp-display {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px;
+  font: 500 13px var(--font-body); color: var(--aar-blue); background: transparent;
+  border: 0; border-radius: 7px; cursor: pointer;
+}
+.vp-display:hover, .vp-display.open { background: var(--aar-blue-fog); }
+.vp-sep { width: 1px; height: 20px; background: var(--line-soft); margin: 0 2px; }
+.vp-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  color: var(--ink-500); background: transparent; border: 0; border-radius: 7px; cursor: pointer;
+}
+.vp-iconbtn:hover { background: var(--aar-blue-fog); color: var(--aar-blue); }
+
+.vp-popover {
+  position: absolute; right: 0; top: calc(100% + 8px); width: 300px; padding: 6px 0 8px;
+  background: #fff; border: 1px solid var(--line-soft); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(31,58,77,.18), 0 2px 6px rgba(31,58,77,.08);
+}
+.vp-pop-head {
+  display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 8px;
+  font: 600 14px var(--font-body); color: #1f3a4d;
+}
+.vp-pop-head button {
+  font: 500 12px var(--font-body); color: var(--aar-blue); background: transparent; border: 0; cursor: pointer;
+}
+.vp-sect { padding: 10px 8px 4px; border-top: 1px solid #e6edf2; }
+.vp-sect-label { padding: 0 8px 4px; font: 600 11px var(--font-body); letter-spacing: 1px; color: var(--ink-500); }
+.vp-row {
+  display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 8px;
+  border-radius: 8px; cursor: pointer; font: 400 13px var(--font-body); color: #1f3a4d;
+}
+.vp-row:hover { background: #f0f5f8; }
+.vp-row-label { flex: 1; }
+.vp-switch { position: relative; width: 30px; height: 18px; border-radius: 9px; background: #c9d7e1; transition: background .12s; }
+.vp-switch::after {
+  content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: #fff; transition: transform .12s;
+}
+.vp-row.on .vp-switch { background: var(--aar-blue); }
+.vp-row.on .vp-switch::after { transform: translateX(12px); }
+.vp-sub { padding: 2px 8px 6px 34px; }
+.vp-color { width: 30px; height: 20px; padding: 0; border: 1px solid var(--line-strong); border-radius: 4px; background: none; cursor: pointer; }
+
+.vp-legend {
+  position: absolute; top: 12px; z-index: 6; display: flex; align-items: center; gap: 6px;
+  padding: 4px; background: rgba(255,255,255,.93); border: 1px solid var(--line-soft);
+  border-radius: 10px; box-shadow: 0 4px 16px rgba(31,58,77,.12);
+}

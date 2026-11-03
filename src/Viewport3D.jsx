@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
@@ -14,6 +14,18 @@ const DEFAULT_STATUS_COLORS = Object.fromEntries(
   STATUS_ORDER.map(k => [k, cssColor(TASK_STATUS[k].color)])
 );
 
+// Field-by-field compare for the status-counts the simulation effect rebuilds every
+// playback tick -- `tasks`/`elements` are flat { [status]: count } objects keyed by
+// STATUS_ORDER, so a few key lookups is all a real equality check needs; no reason to
+// JSON.stringify two whole objects every tick just to throw the strings away.
+function countsEqual(a, b) {
+  if (!a || !b) return false;
+  for (const k of STATUS_ORDER) {
+    if (a.tasks[k] !== b.tasks[k] || a.elements[k] !== b.elements[k]) return false;
+  }
+  return true;
+}
+
 /**
  * One half of the Planned vs Actual split view. Purely a render + simulate pane: it
  * does NOT load its own IFC file. The model, the shared IFCLoader, the buckets and
@@ -27,6 +39,7 @@ const DEFAULT_STATUS_COLORS = Object.fromEntries(
 export default function Viewport3D({
   label, loader, model, modelID, buckets, siteIds, allIds, schedule, currentDate, colourTerrain,
   showStatusColors = true, showUpcoming = false, statusColors = DEFAULT_STATUS_COLORS, onReady,
+  statusFilter = null, onStatusCounts,
   selectedIds, highlightColor = cssColor(HIGHLIGHT.color), onPick, showEdges = true,
 }) {
   const containerRef = useRef();
@@ -42,6 +55,13 @@ export default function Viewport3D({
   // `onPickRef.current`, and this effect keeps that pointed at the latest closure.
   const onPickRef = useRef(onPick);
   useEffect(() => { onPickRef.current = onPick; }, [onPick]);
+  // Same ref trick for the counts callback, so the simulation effect below does not
+  // re-run just because the parent handed down a fresh function.
+  const onCountsRef = useRef(onStatusCounts);
+  const lastCountsRef = useRef(null);
+  // Bumped when the deferred edge outlines finish, so the visibility effect re-runs.
+  const [edgesEpoch, setEdgesEpoch] = useState(0);
+  useEffect(() => { onCountsRef.current = onStatusCounts; }, [onStatusCounts]);
 
   useEffect(() => {
     if (!model || !containerRef.current) return;
@@ -49,17 +69,32 @@ export default function Viewport3D({
     container.innerHTML = "";
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xdfe4ea);
+    scene.background = new THREE.Color(0xdbe7f0);
 
-    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 10000);
+    // SplitCompareView now mounts both panes as soon as both files are picked, not
+    // when the Split tab is first opened -- so `container` can genuinely be 0x0 here
+    // (display:none on an ancestor collapses it) while this pane loads in the
+    // background. A 0/0 aspect ratio is NaN, which would leave the camera's own
+    // projection matrix undefined until the real ResizeObserver below corrects it --
+    // harmless while nothing is ever rendered to a hidden pane, but the warm-up
+    // render loop further down DOES render while hidden on purpose, so it needs a
+    // well-formed camera/renderer to do that against. Falls back to a plausible
+    // viewport size; onResize overwrites this with the real one the moment the pane
+    // actually becomes visible.
+    const initW = container.clientWidth || 800;
+    const initH = container.clientHeight || 600;
+
+    const camera = new THREE.PerspectiveCamera(60, initW / initH, 0.1, 10000);
     camera.position.set(10, 10, 10);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(initW, initH);
+    // At least 1.5x: on standard-density screens this supersamples, which is what makes
+    // thin edge lines and element borders read crisply instead of shimmering.
+    renderer.setPixelRatio(Math.min(Math.max(window.devicePixelRatio || 1, 1.5), 2));
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
+    renderer.toneMappingExposure = 1.12;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
@@ -75,7 +110,8 @@ export default function Viewport3D({
     // active/follower sync across both panes -- see the note there. Each pane owns its
     // own render loop, so the parent only ever mutates this camera's transform; it
     // never renders it itself.
-    onReady?.({ camera, controls });
+    const readyApi = { camera, controls, fitView: null };
+    onReady?.(readyApi);
 
     // Always mid-simulation, so always under the calmer light the un-tone-mapped
     // status materials need -- see STATUS_LIGHTING's note in SimpleViewer.
@@ -122,10 +158,31 @@ export default function Viewport3D({
     };
 
     let running = true;
+    const mountedAt = performance.now();
+    // A bounded burst of REAL renders even while hidden, for WARMUP_MS after mount.
+    // WebGL only compiles a material's shader program on its first actual draw call --
+    // profiling showed that compile is the dominant cost of opening this pane, and
+    // with both panes now mounting in the background as soon as both files are picked
+    // (see SplitCompareView's eager-mount note), that cost was STILL landing exactly
+    // on the click that makes the pane visible, because this loop skipped rendering
+    // entirely while hidden. Actually rendering for a few seconds right after mount
+    // pays that same compile cost in the background instead, while the user is still
+    // looking at another tab -- WARMUP_MS is comfortably longer than the load + first
+    // simulation pass takes, so every material that will ever be drawn (palette,
+    // status colours, edges, highlight) has already been compiled at least once by
+    // the time it ends. After that it reverts to the original behaviour: a hidden
+    // pane costs nothing, forever, same as before this existed.
+    const WARMUP_MS = 5000;
     (function animate() {
       if (!running) return;
-      controls.update();
-      renderer.render(scene, camera);
+      const warmingUp = performance.now() - mountedAt < WARMUP_MS;
+      // Hidden view (display:none, e.g. the other tab) past the warm-up window: keep
+      // the loop alive but skip the work -- clientWidth is 0 there, so nothing is
+      // drawn until it is shown again.
+      if (warmingUp || (container.clientWidth && container.clientHeight)) {
+        controls.update();
+        renderer.render(scene, camera);
+      }
       requestAnimationFrame(animate);
     })();
 
@@ -133,11 +190,17 @@ export default function Viewport3D({
     // more detailed comment in SimpleViewer.jsx. This pane is ALWAYS mid-simulation
     // (the whole point of the split view), so a single whole-model outline would spoil
     // unbuilt geometry on every frame, not just sometimes.
+    const buildAllEdges = async () => {
+    // Start on the next tick so mounting the pane returns (and paints) first.
+    await new Promise(r => setTimeout(r, 0));
+    if (!running) return;
     const vertCount = model.geometry?.attributes?.position?.count ?? 0;
     if (vertCount > 0 && vertCount < 3000000) {
       const edgeGroups = new Map();
+      edgesRef.current = edgeGroups;   // filled as slices finish; cleanup disposes whatever exists
+      let lastYield = performance.now();
       const edgeMaterial = () =>
-        new THREE.LineBasicMaterial({ color: 0x33383d, transparent: true, opacity: 0.5 });
+        new THREE.LineBasicMaterial({ color: 0x1f2a33, transparent: true, opacity: 0.7 });
       const buildEdgesFor = (ids, key) => {
         if (!ids.length) return;
         const tempID = `__edge_tmp_${key}`;
@@ -160,23 +223,30 @@ export default function Viewport3D({
       if (schedule?.hasSchedule) {
         for (const task of schedule.tasks.values()) {
           if (task.isSummary || !task.elementIds.length) continue;
+          if (!running) return;
           buildEdgesFor(task.elementIds, `task-${task.id}`);
+          if (performance.now() - lastYield > 12) { await new Promise(r => setTimeout(r, 0)); lastYield = performance.now(); }
           for (const id of task.elementIds) scheduledIds.add(id);
         }
       }
+      if (!running) return;
       buildEdgesFor(allIds.filter(id => !scheduledIds.has(id)), "unscheduled");
-      edgesRef.current = edgeGroups;
+      if (running) setEdgesEpoch(e => e + 1);
     }
+    };
 
     let ground = null;
     const { frame: fBox, full } = buildingFrameBox(model, siteIds, label || "split");
     if (!fBox.isEmpty()) {
       const { center, radius } = frameCamera({ camera, controls, sun }, fBox, full);
+      readyApi.fitView = () => frameCamera({ camera, controls, sun }, fBox, full);
       if (siteIds.size === 0) {
         ground = makeShadowGround(center, radius, full.min.y);
         scene.add(ground);
       }
     }
+
+    buildAllEdges();
 
     const onResize = () => {
       if (!container.clientWidth || !container.clientHeight) return;
@@ -314,7 +384,7 @@ export default function Viewport3D({
       const es = +(schedule.tasks.get(taskId)?.effStart || 0);
       lines.visible = showEdges && !!es && t >= es;
     }
-  }, [showEdges, currentDate, schedule]);
+  }, [showEdges, currentDate, schedule, edgesEpoch]);
 
   // The 4D build-up + traffic-light colouring. Same subset-drawing shape as
   // SimpleViewer's simulation effect; see that file for the bucket-by-bucket
@@ -379,7 +449,7 @@ export default function Viewport3D({
     const statusFn = schedule?.hasBaseline
       ? (task, date) => taskStatusAt(task, date, showUpcoming)
       : (task, date) => (taskStatusAt(task, date) === "inProgress" ? "inProgress" : null);
-    const { byStatus } = elementStatusAt(schedule, currentDate, statusFn);
+    const { byStatus, taskCounts } = elementStatusAt(schedule, currentDate, statusFn);
 
     const skip = colourTerrain ? null : d.siteIds;
     const shown = skip ? (ids) => ids.filter(id => !skip.has(id)) : (ids) => ids;
@@ -406,12 +476,28 @@ export default function Viewport3D({
       if (!scheduled.has(id) || reached.has(id)) trueColor.push(id);
     }
 
-    drawNatural(trueColor);
+    // Legend filter: with a status chip selected, only that status is drawn.
+    const iso = showStatusColors ? statusFilter : null;
+    drawNatural(iso ? [] : trueColor);
     if (showStatusColors) {
-      for (const k of STATUS_ORDER) drawStatus(k, shown(byStatus[k]));
+      for (const k of STATUS_ORDER) if (!iso || k === iso) drawStatus(k, shown(byStatus[k]));
     }
     flush();
-  }, [currentDate, colourTerrain, showStatusColors, schedule, showUpcoming]);
+
+    // Only report when the numbers actually changed -- most timeline ticks change
+    // nothing, and every report re-renders the parent (toolbar, Gantt, ...). A manual
+    // field compare instead of JSON.stringify-ing both sides every tick -- see
+    // countsEqual above.
+    if (onCountsRef.current) {
+      const elements = {};
+      for (const k of STATUS_ORDER) elements[k] = byStatus[k].length;
+      const nextCounts = { tasks: taskCounts, elements };
+      if (!countsEqual(lastCountsRef.current, nextCounts)) {
+        lastCountsRef.current = nextCounts;
+        onCountsRef.current({ tasks: taskCounts, elements });
+      }
+    }
+  }, [currentDate, colourTerrain, showStatusColors, schedule, showUpcoming, statusFilter]);
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>

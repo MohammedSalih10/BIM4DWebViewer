@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { taskProgressAt } from "./ifcSchedule";
 
 // Natural sort for activity codes ("A2" before "A10"): split into a leading
@@ -26,10 +26,10 @@ const HEADER_H = 36;
 // weekday cells below, since "Mon"/"Tue" alone carries no month context. Carved out
 // of HEADER_H rather than added on top, so nothing downstream that positions off
 // HEADER_H (rows, playhead, scroll-into-view) needs to know the zoom level.
-const MONTH_ROW_H = 14;
+const MONTH_ROW_H = 16;
 // Wide enough for the longest header, "Actual Finish", at the header font size below.
 const DATE_W = 78;
-const BAR_H = 11;
+const BAR_H = 13;
 // The seek slider's floor when the playback row runs out of room -- see MIN_SLIDER_W's
 // use on that row: Play and the date box hold their size, so the slider is what
 // shrinks, but it still needs to stay draggable at whatever width is left.
@@ -42,7 +42,7 @@ const COLORS = {
   done: "var(--status-ontime)",
   float: "var(--line-strong)",
   arrow: "var(--ink-400)",
-  arrowCrit: "#EF9A9C",
+  arrowCrit: "#E8777A",
   playhead: "var(--status-delayed)",
 };
 
@@ -64,7 +64,7 @@ const dateCell = { width: DATE_W, color: "var(--ink-400)", fontFamily: "var(--fo
 
 // Explicit size + nowrap so the four full labels cannot wrap or clip whatever the
 // surrounding font size happens to be.
-const dateHead = { width: DATE_W, color: "var(--ink-500)", fontSize: 10, whiteSpace: "nowrap" };
+const dateHead = { width: DATE_W, color: "var(--ink-500)", fontSize: 11, whiteSpace: "nowrap" };
 
 /**
  * Actual-date cells. These are RECORDED FACTS ONLY -- an activity with no actual leaves
@@ -124,7 +124,7 @@ const speedBtn = {
 // A checkbox rendered as a small filled/outline square, matching the theme's flag-chip
 // convention used throughout the app (Dependencies / Critical only here).
 const checkboxBox = (on) => ({
-  width: 13, height: 13, display: "grid", placeItems: "center", fontSize: 9, lineHeight: 1,
+  width: 13, height: 13, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1,
   background: on ? "var(--aar-blue)" : "var(--paper)",
   border: "1px solid " + (on ? "var(--aar-blue)" : "var(--line-strong)"), color: "#fff",
 });
@@ -133,12 +133,175 @@ const flagLabel = {
   cursor: "pointer", whiteSpace: "nowrap",
 };
 
+/**
+ * One row of the left-hand task table. Memoized with React.memo: nothing it shows
+ * (code, name, the four/six date columns, variance, float) depends on `currentDate`,
+ * only on the task itself, the current selection and the collapse state -- none of
+ * which change on a playback tick. Without this, EVERY row in the table re-rendered
+ * on every single tick (several times a second during playback) for no visible
+ * reason. `selectRef` is a ref, not the raw callback: the parent viewer
+ * (SimpleViewer/SplitCompareView) recreates its onSelectTask closure on every one of
+ * its own renders, which would otherwise defeat this memoization every time --
+ * same ref-indirection trick as `onPickRef` in Viewport3D.jsx.
+ */
+const TaskRow = React.memo(function TaskRow({
+  t, sel, tableW, bl, hasKids, isCollapsed, striped, onToggleCollapse, selectRef,
+}) {
+  return (
+    <div style={{ display: "flex", height: ROW_H, position: "relative" }}>
+      <div
+        onClick={() => selectRef.current(sel ? null : t.id)}
+        title={`${t.name}${t.elementIds.length ? ` — ${t.elementIds.length} elements` : ""}`}
+        style={{
+          width: tableW, flexShrink: 0,
+          display: "flex", alignItems: "center", gap: 6, padding: "0 6px",
+          boxSizing: "border-box", cursor: "pointer",
+          background: sel ? "var(--aar-blue-fog)" : (striped ? "var(--paper-2)" : "var(--paper)"),
+          boxShadow: sel ? "inset 3px 0 0 var(--aar-blue)" : "none",
+          borderRight: "1px solid var(--line-strong)",
+          borderBottom: "1px solid var(--paper-cool)",
+        }}
+      >
+        <span style={{ width: 52, fontSize: 12, color: "var(--ink-400)", overflow: "hidden",
+                      flexShrink: 0 }}>
+          {t.code}
+        </span>
+        <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 4,
+                       paddingLeft: t.depth * 12, overflow: "hidden" }}>
+          <span
+            onClick={e => {
+              if (!hasKids) return;
+              e.stopPropagation();
+              onToggleCollapse(t.id);
+            }}
+            style={{ width: 9, flexShrink: 0, color: "var(--ink-400)" }}
+          >
+            {hasKids ? (isCollapsed ? "▸" : "▾") : ""}
+          </span>
+          <span style={{
+            fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            fontWeight: t.isSummary ? 600 : 400,
+            color: t.critical ? COLORS.critical : "var(--ink-700)",
+          }}>
+            {t.name}
+          </span>
+        </span>
+        {/* Start / Finish -- the updated file's own schedule, links applied */}
+        <span style={dateCell}>{fmt(t.curStart ?? t.start)}</span>
+        <span style={dateCell}>{fmt(t.curFinish ?? t.finish)}</span>
+
+        {/* BL Start / BL Finish -- only when a baseline is actually merged */}
+        {bl && (
+          <>
+            <span style={{ ...dateCell, color: "var(--aar-blue-deep)" }}>{fmt(t.start)}</span>
+            <span style={{ ...dateCell, color: "var(--aar-blue-deep)" }}>{fmt(t.finish)}</span>
+          </>
+        )}
+
+        {/* Actual Start / Finish -- recorded facts only, blank otherwise */}
+        <span style={{ ...dateCell, ...(t.actualStart ? actualStyle : null) }}>
+          {t.actualStart ? fmt(t.actualStart) : ""}
+        </span>
+        <span style={{ ...dateCell, ...(t.actualFinish ? actualStyle : null) }}>
+          {t.actualFinish ? fmt(t.actualFinish) : ""}
+        </span>
+
+        <span style={{ width: 44, textAlign: "right", fontSize: 11, fontWeight: 600,
+                       color: varianceColor(t.varianceDays) }}>
+          {varianceText(t.varianceDays)}
+        </span>
+        <span style={{ width: 34, textAlign: "right", fontSize: 11, color: "var(--ink-400)" }}>
+          {t.isSummary || t.totalFloat == null ? "" : `${t.totalFloat}d`}
+        </span>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * One row of the right-hand timeline: the bar track, the bar (or summary chevron),
+ * the progress fill and the remaining-float tick. Memoized for the same reason as
+ * TaskRow -- `done` (the only prop that genuinely changes every tick) only differs
+ * from the previous tick for whichever task is currently in progress, so every OTHER
+ * row's memo short-circuits and skips re-rendering entirely.
+ */
+const BarRow = React.memo(function BarRow({
+  t, sel, x, w, done, color, pxPerDay, width, striped, selectRef,
+}) {
+  return (
+    <div style={{ display: "flex", height: ROW_H, position: "relative", zIndex: 2,
+                 background: sel ? "var(--aar-blue-fog)" : "transparent" }}>
+      {/* bar track. Not seekable -- only the toolbar slider above moves the
+          playhead now, so a drag here can no longer be mistaken for (or
+          interfere with) clicking a bar to select its task. */}
+      <div
+        style={{ position: "relative", width, flexShrink: 0,
+                 borderBottom: "1px solid var(--paper-cool)",
+                 background: striped ? "rgba(190,212,228,.32)" : "transparent" }}
+      >
+        {/* remaining float, so slack is visible next to the bar */}
+        {!t.isSummary && t.totalFloat > 0 && (
+          <div style={{
+            position: "absolute", left: x + w, top: ROW_H / 2 - 1,
+            width: t.totalFloat * (7 / 5) * pxPerDay, height: 2,
+            background: COLORS.float,
+          }} />
+        )}
+
+        {t.isSummary ? (
+          <div style={{
+            position: "absolute", left: x, width: w, top: ROW_H / 2 - 4,
+            height: 8, background: color,
+            clipPath: "polygon(0 0, 100% 0, 100% 100%, 96% 40%, 4% 40%, 0 100%)",
+          }} />
+        ) : (
+          <div
+            onClick={e => { e.stopPropagation(); selectRef.current(sel ? null : t.id); }}
+            title={`${t.name} — ${fmt(t.start)} to ${fmt(t.finish)}` +
+                   `${t.totalFloat != null ? `, float ${t.totalFloat}d` : ""}` +
+                   `${t.critical ? " (critical)" : ""}`}
+            style={{
+              position: "absolute", left: x, width: w, top: (ROW_H - BAR_H) / 2,
+              height: BAR_H, background: color,
+              cursor: "pointer", overflow: "hidden", borderRadius: 2,
+              outline: sel ? "2px solid var(--aar-blue)" : "none",
+            }}
+          >
+            {/* Progress runs as a thinner inner bar, the way MS Project and
+                P6 draw it, so a finished task still shows whether it was on
+                the critical path instead of turning solid green. */}
+            {done > 0 && (
+              <div style={{
+                position: "absolute", left: 0, top: (BAR_H - 7) / 2,
+                width: `${done * 100}%`, height: 7,
+                background: COLORS.done,
+              }} />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 export default function GanttChart({
   schedule, currentDate, onDateChange, selectedTaskId, onSelectTask,
   playing, onTogglePlay, speed, onSpeedChange,
 }) {
-  const scrollRef = useRef(null);
+  // `onSelectTask` is a fresh closure on every render of the parent viewer -- see the
+  // note on TaskRow/BarRow above. Keeping the latest one in a ref lets those memoized
+  // rows take a referentially-STABLE prop instead, so passing a new onSelectTask down
+  // doesn't force every row to re-render.
+  const selectRef = useRef(onSelectTask);
+  useEffect(() => { selectRef.current = onSelectTask; }, [onSelectTask]);
+  const scrollRef = useRef(null);      // right pane (timeline); drives vertical scroll
+  const leftPaneRef = useRef(null);    // left pane (task table)
+  const outerRef = useRef(null);       // wrapper around both panes + divider
   const [collapsed, setCollapsed] = useState({});
+  // Stable across renders (useCallback, no deps) so it can be handed to the memoized
+  // TaskRow below without defeating React.memo the way an inline arrow recreated
+  // every render would.
+  const toggleCollapse = useCallback((id) => setCollapsed(p => ({ ...p, [id]: !p[id] })), []);
   // null = the file's own hierarchical WBS order (the default). "asc"/"desc" keep the
   // tree exactly as-is -- same parents, same nesting, same indent -- and only reorder
   // SIBLINGS within each group by activity code, the way P6/Synchro sort columns work.
@@ -173,7 +336,7 @@ export default function GanttChart({
   // below); once the user drags, this holds their chosen width instead, and keeps
   // winning even if `bl` later changes the default (loading/unloading a baseline
   // shouldn't silently undo a resize the user just made).
-  const [leftWOverride, setLeftWOverride] = useState(null);
+  const [leftFrac, setLeftFrac] = useState(null);   // null = 50/50 split
   const [resizingCols, setResizingCols] = useState(false);
 
   const range = schedule?.range;
@@ -256,20 +419,26 @@ export default function GanttChart({
   // The BL pair only exists when a baseline has actually been merged.
   const bl = !!schedule?.hasBaseline;
   const leftWBase = LEFT_W_BASE + (bl ? 2 * DATE_W : 0);
-  const leftW = leftWOverride ?? leftWBase;
+  // Left pane = leftFrac of the width (default half), the rest is the timeline.
+  // tableW is the table's own content width: never narrower than its columns
+  // need (the pane then scrolls sideways on its own), and stretched to fill the
+  // pane when it is wider so the Task column absorbs the extra room.
+  const DIV_W = 6;
+  const paneW = containerW
+    ? Math.round((containerW - DIV_W) * (leftFrac ?? 0.5))
+    : leftWBase;
+  const leftW = paneW;
+  const tableW = Math.max(leftWBase, paneW);
 
-  // Drag the boundary between the task table and the chart. Mirrors the ganttH
-  // resize pattern the panel itself uses (a window-level mousemove/mouseup pair
-  // rather than anything on the handle itself), clamped so the task list can't be
-  // squeezed to nothing or dragged wide enough to swallow the whole chart.
+  // Drag the divider between the panes (window-level mousemove/mouseup pair).
   const onColResizeMouseDown = (e) => {
     e.preventDefault();
     const startX = e.clientX;
-    const startW = leftW;
+    const startW = paneW;
+    const total = Math.max(1, containerW - DIV_W);
     setResizingCols(true);
     const move = (ev) => {
-      const next = Math.max(320, Math.min(1600, startW + (ev.clientX - startX)));
-      setLeftWOverride(next);
+      setLeftFrac(Math.max(0.15, Math.min(0.85, (startW + (ev.clientX - startX)) / total)));
     };
     const up = () => {
       setResizingCols(false);
@@ -285,7 +454,7 @@ export default function GanttChart({
   // itself). fitMode's effect below reads this to know how many pixels are actually
   // available for the chart.
   useEffect(() => {
-    const el = scrollRef.current;
+    const el = outerRef.current;
     if (!el) return;
     const update = () => setContainerW(el.clientWidth);
     update();
@@ -300,9 +469,9 @@ export default function GanttChart({
   // project, no forced scrolling on a long one.
   useEffect(() => {
     if (!fitMode || !axis || !containerW) return;
-    const avail = Math.max(50, containerW - leftW);
+    const avail = Math.max(50, containerW - paneW - DIV_W - 14);
     setPxPerDay(Math.max(0.3, avail / axis.days));
-  }, [fitMode, axis, containerW, leftW]);
+  }, [fitMode, axis, containerW, paneW]);
 
   // Follow the playhead horizontally as the timeline (top slider or Play) moves it,
   // rather than leaving the user to chase it with the scrollbar. Only nudges the
@@ -311,7 +480,7 @@ export default function GanttChart({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !axis || !currentDate) return;
-    const viewWidth = el.clientWidth - leftW;
+    const viewWidth = el.clientWidth;
     if (viewWidth <= 0) return;
     const playheadPx = xOf(currentDate);
     const margin = Math.min(80, viewWidth * 0.15);
@@ -320,7 +489,7 @@ export default function GanttChart({
       // than trailing history while playing forward.
       el.scrollLeft = Math.max(0, playheadPx - viewWidth * 0.3);
     }
-  }, [currentDate, axis, pxPerDay, leftW]);
+  }, [currentDate, axis, pxPerDay]);
 
   // Follow the task list vertically too: whichever row the playhead currently sits
   // inside of (its own Start/Finish, links applied) is scrolled into view. Leaf
@@ -356,84 +525,74 @@ export default function GanttChart({
     if (!dateFocused) setDateDraft(fmt(currentDate));
   }, [currentDate, dateFocused]);
 
-  if (!schedule?.hasSchedule || !axis) {
-    return (
-      <div style={{ padding: 10, fontSize: 12, color: "var(--ink-400)", fontFamily: "var(--font-mono)" }}>
-        {schedule ? "This file contains no IfcTask schedule." : "Load an IFC file."}
-      </div>
-    );
-  }
-
   // --- calendar bands and gridlines for the selected zoom -------------------------
   // Month zoom has month cells, week zoom has Monday-to-Sunday cells, and day zoom
   // has one cell per calendar day. Keeping the header and the background grid on the
   // same bands makes every bar line up with the visible calendar segregation.
   const timeScale = pxPerDay >= 24 ? "day" : pxPerDay >= 10 ? "week" : "month";
-  const bands = [];
-  {
-    const d = new Date(axis.start);
-    let cur;
-    let next;
-    if (timeScale === "day") {
-      cur = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-      next = (t) => t + DAY;
-    } else if (timeScale === "week") {
-      // Monday is the conventional construction-programme week boundary.
-      const mondayOffset = (d.getUTCDay() + 6) % 7;
-      cur = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - mondayOffset);
-      next = (t) => t + 7 * DAY;
-    } else {
-      cur = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
-      next = (t) => {
-        const m = new Date(t);
-        return Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1);
-      };
-    }
-    while (cur <= axis.end) {
-      const end = next(cur);
-      bands.push({ start: Math.max(cur, axis.start), end: Math.min(end, axis.end), labelDate: cur });
-      cur = end;
-    }
-  }
 
-  // Month heading strip, Day zoom only: consecutive day-bands sharing a calendar
-  // month are merged into one wide cell, so "November" reads once across all of its
-  // days instead of repeating on every column.
-  const monthBands = [];
-  if (timeScale === "day") {
-    for (const band of bands) {
-      const d = new Date(band.labelDate);
-      const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
-      const last = monthBands[monthBands.length - 1];
-      if (last && last.key === key) {
-        last.end = band.end;
+  // Memoized -- and hoisted above the early-return below so the hook itself always
+  // runs. `bands`/`monthBands` only change with the zoom level or the schedule's own
+  // span, never with `currentDate`; without memoizing, the whole calendar grid (one
+  // DOM cell per visible day/week/month) was rebuilt from scratch on every single
+  // playback tick for a result that hadn't changed.
+  const { bands, monthBands } = useMemo(() => {
+    if (!axis) return { bands: [], monthBands: [] };
+    const bands = [];
+    {
+      const d = new Date(axis.start);
+      let cur;
+      let next;
+      if (timeScale === "day") {
+        cur = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+        next = (t) => t + DAY;
+      } else if (timeScale === "week") {
+        // Monday is the conventional construction-programme week boundary.
+        const mondayOffset = (d.getUTCDay() + 6) % 7;
+        cur = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - mondayOffset);
+        next = (t) => t + 7 * DAY;
       } else {
-        monthBands.push({
-          key, start: band.start, end: band.end,
-          label: `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
-        });
+        cur = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+        next = (t) => {
+          const m = new Date(t);
+          return Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1);
+        };
+      }
+      while (cur <= axis.end) {
+        const end = next(cur);
+        bands.push({ start: Math.max(cur, axis.start), end: Math.min(end, axis.end), labelDate: cur });
+        cur = end;
       }
     }
-  }
 
-  const bandLabel = (band) => {
-    const d = new Date(band.labelDate);
-    if (timeScale === "month") return `${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear()).slice(2)}`;
-    if (timeScale === "week") {
-      // "Week of month" counted from the 1st, not from which Monday-of-the-year this
-      // is -- so the label resets to 1 at the start of every month, matching how a
-      // site team says "week 2 of November" rather than "the 45th week of the year".
-      const weekOfMonth = Math.ceil(d.getUTCDate() / 7);
-      return `Week ${weekOfMonth} ${MONTHS[d.getUTCMonth()]}`;
+    // Month heading strip, Day zoom only: consecutive day-bands sharing a calendar
+    // month are merged into one wide cell, so "November" reads once across all of its
+    // days instead of repeating on every column.
+    const monthBands = [];
+    if (timeScale === "day") {
+      for (const band of bands) {
+        const d = new Date(band.labelDate);
+        const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
+        const last = monthBands[monthBands.length - 1];
+        if (last && last.key === key) {
+          last.end = band.end;
+        } else {
+          monthBands.push({
+            key, start: band.start, end: band.end,
+            label: `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
+          });
+        }
+      }
     }
-    return WEEKDAYS[d.getUTCDay()];
-  };
+    return { bands, monthBands };
+  }, [axis, timeScale]);
 
-  const playheadX = xOf(currentDate);
-
-  // --- dependency arrow geometry ---
-  const arrows = [];
-  if (showArrows) {
+  // --- dependency arrow geometry --- also hoisted + memoized for the same reason:
+  // links only change with the schedule, the visible row set or the "show
+  // dependencies" toggle, never with the playhead.
+  const arrows = useMemo(() => {
+    if (!showArrows || !schedule?.hasSchedule || !axis) return [];
+    const out = [];
     for (const link of schedule.links) {
       const fromId = visibleRowOf(link.from);
       const toId = visibleRowOf(link.to);
@@ -465,13 +624,37 @@ export default function GanttChart({
         const back = toFinish ? enter + stub : enter - stub;
         d = `M${ax},${ay} L${sx},${ay} L${sx},${mid} L${back},${mid} L${back},${by} L${enter},${by}`;
       }
-      arrows.push({
+      out.push({
         d, key: `${link.from}-${link.to}-${link.type}`,
         critical: a.critical && b.critical,
         toFinish, enter, by,
       });
     }
+    return out;
+  }, [showArrows, schedule, rowIndex]);
+
+  if (!schedule?.hasSchedule || !axis) {
+    return (
+      <div style={{ padding: 10, fontSize: 12, color: "var(--ink-400)", fontFamily: "var(--font-mono)" }}>
+        {schedule ? "This file contains no IfcTask schedule." : "Load an IFC file."}
+      </div>
+    );
   }
+
+  const bandLabel = (band) => {
+    const d = new Date(band.labelDate);
+    if (timeScale === "month") return `${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear()).slice(2)}`;
+    if (timeScale === "week") {
+      // "Week of month" counted from the 1st, not from which Monday-of-the-year this
+      // is -- so the label resets to 1 at the start of every month, matching how a
+      // site team says "week 2 of November" rather than "the 45th week of the year".
+      const weekOfMonth = Math.ceil(d.getUTCDate() / 7);
+      return `Week ${weekOfMonth} ${MONTHS[d.getUTCMonth()]}`;
+    }
+    return WEEKDAYS[d.getUTCDay()];
+  };
+
+  const playheadX = xOf(currentDate);
 
   const totalDays = Math.round((+range.max - +range.min) / DAY);
 
@@ -637,7 +820,7 @@ export default function GanttChart({
       <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "5px 14px",
                     borderBottom: "1px solid var(--line-soft)", background: "var(--paper)",
                     flexWrap: "wrap", flexShrink: 0, fontSize: 11 }}>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 16, alignItems: "center",
+        <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center",
                        color: "var(--ink-600)" }}>
           <Swatch color={COLORS.critical} label={`Critical path (${schedule.criticalIds.size})`} />
           <Swatch color={COLORS.normal} label={bl ? "Baseline" : "Planned"} />
@@ -648,22 +831,23 @@ export default function GanttChart({
         </span>
       </div>
 
-      {/* chart */}
-      <div ref={scrollRef} style={{ flex: 1, overflow: "auto", position: "relative",
-                                    minHeight: 0 }}>
-        <div style={{ position: "relative", width: leftW + width,
-                      height: HEADER_H + bodyH }}>
-
-          {/* header: sticky top, and its left cell sticky in both directions */}
-          <div style={{ position: "sticky", top: 0, zIndex: 6, display: "flex",
-                        height: HEADER_H, background: "var(--paper-2)",
-                        borderBottom: "1px solid var(--line-strong)" }}>
-            <div style={{ position: "sticky", left: 0, zIndex: 7, width: leftW,
+      {/* Two panes, each with its OWN horizontal scrollbar: the task table on the
+          left, the timeline on the right, split 50/50 by default with a draggable
+          divider between them. Vertical scroll is shared -- the right pane is the
+          master and drives the left one (see onScroll / onWheel below). */}
+      <div ref={outerRef} style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
+        <div ref={leftPaneRef}
+             onWheel={e => { if (scrollRef.current) scrollRef.current.scrollTop += e.deltaY; }}
+             style={{ width: paneW, flexShrink: 0, minWidth: 0,
+                      overflowX: "scroll", overflowY: "hidden" }}>
+          <div style={{ position: "relative", width: tableW, height: HEADER_H + bodyH }}>
+            <div style={{ position: "sticky", top: 0, zIndex: 6, width: tableW, height: HEADER_H,
                           flexShrink: 0, display: "flex", alignItems: "center",
                           boxSizing: "border-box",
                           background: "var(--paper-2)", borderRight: "1px solid var(--line-strong)",
+                          borderBottom: "1px solid var(--line-strong)",
                           padding: "0 6px", gap: 6, fontWeight: 600, color: "var(--ink-400)",
-                          fontSize: 10.5, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                          fontSize: 11.5, letterSpacing: "0.04em", textTransform: "uppercase" }}>
               <span
                 onClick={() => setCodeSort(s => (s === "asc" ? "desc" : s === "desc" ? null : "asc"))}
                 title={codeSort
@@ -699,6 +883,38 @@ export default function GanttChart({
                     style={{ width: 44, textAlign: "right" }}>Var</span>
               <span style={{ width: 34, textAlign: "right" }}>Float</span>
             </div>
+            {rows.map((t, i) => (
+              <TaskRow
+                key={t.id}
+                t={t}
+                sel={t.id === selectedTaskId}
+                tableW={tableW}
+                bl={bl}
+                hasKids={t.children.length > 0}
+                isCollapsed={!!collapsed[t.id]}
+                striped={!!(i % 2)}
+                onToggleCollapse={toggleCollapse}
+                selectRef={selectRef}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Divider between the panes. Drag to resize. */}
+        <div
+          onMouseDown={onColResizeMouseDown}
+          title="Drag to resize the task list"
+          style={{ width: DIV_W, flexShrink: 0, cursor: "col-resize", boxSizing: "border-box",
+                   borderLeft: "1px solid var(--line-strong)", borderRight: "1px solid var(--line-strong)",
+                   background: resizingCols ? "rgba(63,110,140,.5)" : "var(--paper-3)" }}
+        />
+
+        <div ref={scrollRef}
+             onScroll={e => { if (leftPaneRef.current) leftPaneRef.current.scrollTop = e.currentTarget.scrollTop; }}
+             style={{ flex: 1, minWidth: 0, overflowX: "scroll", overflowY: "auto", position: "relative" }}>
+          <div style={{ position: "relative", width, height: HEADER_H + bodyH }}>
+            <div style={{ position: "sticky", top: 0, zIndex: 6, height: HEADER_H, width,
+                          background: "var(--paper-2)", borderBottom: "1px solid var(--line-strong)" }}>
             {/* Not seekable here -- the toolbar slider above is the only way to move
                 the playhead, so dragging in the chart can't be mistaken for a task
                 click. See the same note on the bar track below. */}
@@ -714,7 +930,7 @@ export default function GanttChart({
                     top: 0, height: MONTH_ROW_H,
                     borderLeft: "1px solid var(--line-strong)", borderBottom: "1px solid var(--line-strong)",
                     boxSizing: "border-box", padding: "1px 4px", overflow: "hidden",
-                    whiteSpace: "nowrap", color: "var(--ink-600)", fontWeight: 600, fontSize: 9,
+                    whiteSpace: "nowrap", color: "var(--ink-600)", fontWeight: 600, fontSize: 10.5, lineHeight: 1.2,
                     background: "var(--paper-cool)",
                   }}>
                     {w > 30 ? mb.label : ""}
@@ -731,7 +947,7 @@ export default function GanttChart({
                     height: HEADER_H - top,
                     borderLeft: "1px solid var(--line-strong)", boxSizing: "border-box",
                     padding: "3px 4px", overflow: "hidden", whiteSpace: "nowrap",
-                    color: "var(--ink-500)", fontSize: 10,
+                    color: "var(--ink-500)", fontSize: 11,
                   }}>
                     {/* "Mon"/"Tue" etc. are short enough to fit the exact 24px-wide day
                         column at Day zoom -- the old threshold of 26 was tuned for the
@@ -742,10 +958,10 @@ export default function GanttChart({
                 );
               })}
             </div>
-          </div>
+            </div>
 
           {/* Calendar gridlines behind everything, matching the active zoom level. */}
-          <div style={{ position: "absolute", left: leftW, top: HEADER_H, width,
+          <div style={{ position: "absolute", left: 0, top: HEADER_H, width,
                         height: bodyH, zIndex: 0 }}>
             {bands.map(band => (
               <div key={band.labelDate} style={{
@@ -758,7 +974,7 @@ export default function GanttChart({
           {/* dependency arrows, under the bars so they read as connectors */}
           <svg
             width={width} height={bodyH}
-            style={{ position: "absolute", left: leftW, top: HEADER_H, zIndex: 1,
+            style={{ position: "absolute", left: 0, top: HEADER_H, zIndex: 1,
                      pointerEvents: "none" }}
           >
             {arrows.map(a => (
@@ -775,185 +991,42 @@ export default function GanttChart({
             ))}
           </svg>
 
-          {/* rows */}
-          {rows.map((t, i) => {
-            const sel = t.id === selectedTaskId;
-            const x = xOf(t.start);
-            const w = Math.max(3, xOf(t.finish) - x);
-            const done = taskProgressAt(t, currentDate);
-            const hasKids = t.children.length > 0;
-            const color = t.isSummary ? COLORS.summary
-                        : t.critical ? COLORS.critical : COLORS.normal;
-            return (
-              <div key={t.id} style={{ display: "flex", height: ROW_H, position: "relative",
-                                       zIndex: 2, background: sel ? "var(--aar-blue-fog)" : "transparent" }}>
-                {/* task table cell, sticky so it survives horizontal scrolling */}
-                <div
-                  onClick={() => onSelectTask(sel ? null : t.id)}
-                  title={`${t.name}${t.elementIds.length ? ` — ${t.elementIds.length} elements` : ""}`}
-                  style={{
-                    position: "sticky", left: 0, zIndex: 5, width: leftW, flexShrink: 0,
-                    display: "flex", alignItems: "center", gap: 6, padding: "0 6px",
-                    boxSizing: "border-box", cursor: "pointer",
-                    background: sel ? "var(--aar-blue-fog)" : (i % 2 ? "var(--paper-2)" : "var(--paper)"),
-                    boxShadow: sel ? "inset 3px 0 0 var(--aar-blue)" : "none",
-                    borderRight: "1px solid var(--line-strong)",
-                    borderBottom: "1px solid var(--paper-cool)",
-                  }}
-                >
-                  {/* Code and Task name get the biggest bump -- both columns carry far
-                      more empty width than their text ever fills (Code's 52px against a
-                      5-character code; Task's flex:1 against a name a fraction as wide),
-                      unlike Var/Float/the date columns below which are already close to
-                      their box width. */}
-                  <span style={{ width: 52, fontSize: 12, color: "var(--ink-400)", overflow: "hidden",
-                                flexShrink: 0 }}>
-                    {t.code}
-                  </span>
-                  <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 4,
-                                 paddingLeft: t.depth * 12, overflow: "hidden" }}>
-                    <span
-                      onClick={e => {
-                        if (!hasKids) return;
-                        e.stopPropagation();
-                        setCollapsed(p => ({ ...p, [t.id]: !p[t.id] }));
-                      }}
-                      style={{ width: 9, flexShrink: 0, color: "var(--ink-400)" }}
-                    >
-                      {hasKids ? (collapsed[t.id] ? "▸" : "▾") : ""}
-                    </span>
-                    <span style={{
-                      fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      fontWeight: t.isSummary ? 600 : 400,
-                      color: t.critical ? COLORS.critical : "var(--ink-700)",
-                    }}>
-                      {t.name}
-                    </span>
-                  </span>
-                  {/* Start / Finish -- the updated file's own schedule, links applied */}
-                  <span style={dateCell}>{fmt(t.curStart ?? t.start)}</span>
-                  <span style={dateCell}>{fmt(t.curFinish ?? t.finish)}</span>
-
-                  {/* BL Start / BL Finish -- only when a baseline is actually merged */}
-                  {bl && (
-                    <>
-                      <span style={{ ...dateCell, color: "var(--aar-blue-deep)" }}>{fmt(t.start)}</span>
-                      <span style={{ ...dateCell, color: "var(--aar-blue-deep)" }}>{fmt(t.finish)}</span>
-                    </>
-                  )}
-
-                  {/* Actual Start / Finish -- recorded facts only, blank otherwise */}
-                  <span style={{ ...dateCell, ...(t.actualStart ? actualStyle : null) }}>
-                    {t.actualStart ? fmt(t.actualStart) : ""}
-                  </span>
-                  <span style={{ ...dateCell, ...(t.actualFinish ? actualStyle : null) }}>
-                    {t.actualFinish ? fmt(t.actualFinish) : ""}
-                  </span>
-
-                  <span style={{ width: 44, textAlign: "right", fontSize: 11, fontWeight: 600,
-                                 color: varianceColor(t.varianceDays) }}>
-                    {varianceText(t.varianceDays)}
-                  </span>
-                  <span style={{ width: 34, textAlign: "right", fontSize: 11, color: "var(--ink-400)" }}>
-                    {t.isSummary || t.totalFloat == null ? "" : `${t.totalFloat}d`}
-                  </span>
-                </div>
-
-                {/* bar track. Not seekable -- only the toolbar slider above moves the
-                    playhead now, so a drag here can no longer be mistaken for (or
-                    interfere with) clicking a bar to select its task. */}
-                <div
-                  style={{ position: "relative", width, flexShrink: 0,
-                           borderBottom: "1px solid var(--paper-cool)",
-                           background: i % 2 ? "rgba(236,237,239,.5)" : "transparent" }}
-                >
-                  {/* remaining float, so slack is visible next to the bar */}
-                  {!t.isSummary && t.totalFloat > 0 && (
-                    <div style={{
-                      position: "absolute", left: x + w, top: ROW_H / 2 - 1,
-                      width: t.totalFloat * (7 / 5) * pxPerDay, height: 2,
-                      background: COLORS.float,
-                    }} />
-                  )}
-
-                  {t.isSummary ? (
-                    <div style={{
-                      position: "absolute", left: x, width: w, top: ROW_H / 2 - 4,
-                      height: 8, background: color,
-                      clipPath: "polygon(0 0, 100% 0, 100% 100%, 96% 40%, 4% 40%, 0 100%)",
-                    }} />
-                  ) : (
-                    <div
-                      onClick={e => { e.stopPropagation(); onSelectTask(sel ? null : t.id); }}
-                      title={`${t.name} — ${fmt(t.start)} to ${fmt(t.finish)}` +
-                             `${t.totalFloat != null ? `, float ${t.totalFloat}d` : ""}` +
-                             `${t.critical ? " (critical)" : ""}`}
-                      style={{
-                        position: "absolute", left: x, width: w, top: (ROW_H - BAR_H) / 2,
-                        height: BAR_H, background: color,
-                        cursor: "pointer", overflow: "hidden",
-                        outline: sel ? "2px solid var(--aar-blue)" : "none",
-                      }}
-                    >
-                      {/* Progress runs as a thinner inner bar, the way MS Project and
-                          P6 draw it, so a finished task still shows whether it was on
-                          the critical path instead of turning solid green. */}
-                      {done > 0 && (
-                        <div style={{
-                          position: "absolute", left: 0, top: (BAR_H - 5) / 2,
-                          width: `${done * 100}%`, height: 5,
-                          background: COLORS.done,
-                        }} />
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+            {rows.map((t, i) => {
+              const x = xOf(t.start);
+              const w = Math.max(3, xOf(t.finish) - x);
+              const color = t.isSummary ? COLORS.summary
+                          : t.critical ? COLORS.critical : COLORS.normal;
+              return (
+                <BarRow
+                  key={t.id}
+                  t={t}
+                  sel={t.id === selectedTaskId}
+                  x={x}
+                  w={w}
+                  done={taskProgressAt(t, currentDate)}
+                  color={color}
+                  pxPerDay={pxPerDay}
+                  width={width}
+                  striped={!!(i % 2)}
+                  selectRef={selectRef}
+                />
+              );
+            })}
 
           {/* playhead */}
           <div style={{
-            position: "absolute", left: leftW + playheadX, top: 0,
-            height: HEADER_H + bodyH, width: 1, background: COLORS.playhead,
+            position: "absolute", left: playheadX, top: 0,
+            height: HEADER_H + bodyH, width: 2, background: COLORS.playhead,
             zIndex: 4, pointerEvents: "none",
           }}>
             <div style={{
               position: "sticky", top: 0, marginLeft: -26, width: 52,
               textAlign: "center", background: COLORS.playhead, color: "#fff",
-              fontSize: 9, padding: "1px 0",
+              fontSize: 10.5, padding: "1px 0",
             }}>
               {fmt(currentDate).slice(5)}
             </div>
           </div>
-
-          {/* Resize handle between the task table and the chart. Wrapped in a
-              pointerEvents:"none" overlay the exact size of the content so the
-              handle itself (pointerEvents:"auto") is the only clickable bit --
-              everything else (bars, task rows) underneath still gets clicks
-              normally. The handle is `position:sticky, left: leftW` with no `top`
-              set: like the sticky task-table cells it mirrors, that tracks
-              HORIZONTAL scroll (always sitting right at the table/chart boundary,
-              wherever the user has scrolled to) while scrolling normally with
-              vertical scroll, same as the rows it overlays. */}
-          <div style={{
-            position: "absolute", left: 0, top: 0, width: leftW + width,
-            height: HEADER_H + bodyH, zIndex: 8, pointerEvents: "none",
-          }}>
-            <div
-              onMouseDown={onColResizeMouseDown}
-              title="Drag to resize the task list"
-              style={{
-                // No `top` here -- that's what keeps this tracking vertical scroll
-                // normally (moving with the rows underneath) while `left` alone
-                // makes it stick horizontally. Adding `top: 0` would pin it to the
-                // viewport's top edge instead, the same mistake as anchoring it to
-                // the sticky header.
-                position: "sticky", left: leftW - 3, width: 6, height: "100%",
-                cursor: "col-resize", pointerEvents: "auto",
-                background: resizingCols ? "rgba(0,147,210,.5)" : "transparent",
-              }}
-            />
           </div>
         </div>
       </div>
@@ -963,8 +1036,11 @@ export default function GanttChart({
 
 function Swatch({ color, label }) {
   return (
-    <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-      <span style={{ width: 16, height: 8, background: color, display: "inline-block" }} />
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, whiteSpace: "nowrap",
+                   padding: "3px 10px 3px 8px", background: "var(--paper-2)",
+                   border: "1px solid var(--line)", borderRadius: "var(--r-sm)",
+                   color: "var(--ink-600)", fontSize: 11 }}>
+      <span style={{ width: 12, height: 8, background: color, borderRadius: 2, display: "inline-block" }} />
       {label}
     </span>
   );

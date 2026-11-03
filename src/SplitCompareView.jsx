@@ -1,14 +1,24 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { IFCLoader } from "web-ifc-three/IFCLoader";
 import { collectElements, cssColor, HIGHLIGHT } from "./ifcMaterials";
 import { readSchedule, withBaseline, TASK_STATUS, STATUS_ORDER } from "./ifcSchedule";
 import Viewport3D from "./Viewport3D";
 import GanttChart from "./GanttChart";
 import ColorCodingSettings from "./ColorCodingSettings";
+import FloatingViewControls, { DisplayRow, DisplaySection, VpIcon, VP_ICONS } from "./ViewportControls";
+
+// Each pane has its own ~32px "PLANNED" / "ACTUAL" heading bar (Viewport3D); the floating
+// controls start below it (plus a 12px margin) so they never cover the headings.
+const PANE_CHROME_TOP = 44;
 import UpcomingActivities from "./UpcomingActivities";
 import ElementDetailsDialog from "./ElementDetailsDialog";
 
 const TICK_MS = 120;
+
+// Shared stable reference for "nothing selected", so the memoized selection arrays
+// below don't hand Viewport3D a brand-new empty array (and trigger its highlight
+// effect) on every render just because nothing is selected.
+const EMPTY_IDS = [];
 
 // The app's own traffic-light colours, as "#rrggbb" -- the starting point for the
 // per-user override in ColorCodingSettings, and what "Reset to defaults" goes back to.
@@ -59,6 +69,9 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
   const [colourTerrain, setColourTerrain] = useState(false);
   const [showEdges, setShowEdges] = useState(true);
   const [showStatusColors, setShowStatusColors] = useState(true);
+  // Legend: counts come from the Actual pane; clicking a chip isolates that status in BOTH panes.
+  const [statusCounts, setStatusCounts] = useState(null);
+  const [statusFilter, setStatusFilter] = useState(null);
   // User-picked overrides for the traffic-light colours -- "system colours" (no
   // colour coding at all) is what showStatusColors=false already means, so this only
   // customises the colours used WHEN colour coding is on.
@@ -92,7 +105,8 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
   // scene/camera/render loop and knows nothing about its sibling, so the two report
   // their {camera, controls} up here via onReady, and a loop in THIS component copies
   // the last-moved one's transform onto the other every frame -- the same
-  // active/follower pattern, across two separate components. Mutating the follower's camera/controls in place is
+  // active/follower pattern the old Split4D.jsx used, just across two separate
+  // components instead of one. Mutating the follower's camera/controls in place is
   // enough: its own Viewport3D still renders it every frame, it just picks up
   // whatever this loop last set.
   const [locked, setLocked] = useState(true);
@@ -134,6 +148,11 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
 
     (async () => {
       try {
+        // Let the browser paint the tab switch and the "Loading" status first -- the
+        // IFC parse below blocks the main thread, so without this the click appears to
+        // hang for the whole load instead of showing the window immediately.
+        await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+        if (cancelled) return;
         const loader = new IFCLoader();
         await loader.ifcManager.setWasmPath("/wasm/");
         loaderRef.current = loader;
@@ -152,6 +171,9 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
         const plannedID = realIdOf(keysBefore1);
         const { allIds: pIds, buckets: pBuckets } = await collectElements(loader, plannedModel, plannedID);
         const plannedSched = await readSchedule(loader, plannedID);
+        if (cancelled) return;
+        // Paint the Planned pane before parsing the second file starts.
+        await new Promise(r => setTimeout(r, 0));
         if (cancelled) return;
         setPlannedPane({
           model: plannedModel, modelID: plannedID, buckets: pBuckets, allIds: pIds,
@@ -245,10 +267,22 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
     return [];
   }
 
-  const selectedCode = selectedTaskId != null ? actualSchedule?.tasks?.get(selectedTaskId)?.code : null;
+  // Memoized for two reasons: re-deriving these means re-scanning the WHOLE planned
+  // task map (taskElementIdsByCode is a linear search) on every render, including
+  // every ~120ms playback tick -- and without a stable array reference, each pane's
+  // own highlight effect (keyed on `[selectedIds, model]` in Viewport3D) sees a "new"
+  // array every tick and reruns its createSubset call for nothing, even when the
+  // selection hasn't changed.
+  const selectedCode = useMemo(
+    () => (selectedTaskId != null ? actualSchedule?.tasks?.get(selectedTaskId)?.code : null),
+    [selectedTaskId, actualSchedule]);
   // The Actual pane IS `actualSchedule` (see the load effect), so no translation needed.
-  const actualSelIds = selectedTaskId != null ? (actualSchedule?.tasks?.get(selectedTaskId)?.elementIds ?? []) : [];
-  const plannedSelIds = selectedCode != null ? taskElementIdsByCode(plannedPane?.schedule, selectedCode) : [];
+  const actualSelIds = useMemo(
+    () => (selectedTaskId != null ? (actualSchedule?.tasks?.get(selectedTaskId)?.elementIds ?? EMPTY_IDS) : EMPTY_IDS),
+    [selectedTaskId, actualSchedule]);
+  const plannedSelIds = useMemo(
+    () => (selectedCode != null ? taskElementIdsByCode(plannedPane?.schedule, selectedCode) : EMPTY_IDS),
+    [selectedCode, plannedPane?.schedule]);
 
   // Click-to-select in either pane: resolve the clicked element to a task and drive
   // the SAME `selectedTaskId` the Gantt uses, so a pick in one pane highlights the
@@ -328,61 +362,20 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
 
   const cd = currentDate || actualSchedule?.range?.min;
 
+  const fitBothPanes = () => {
+    const { planned, actual } = panesRef.current;
+    planned?.fitView?.();
+    actual?.fitView?.();
+  };
+
+  // Back to the defaults the toggles start with.
+  const resetDisplay = () => {
+    setLocked(true); setShowStatusColors(true); setShowUpcoming(false);
+    setColourTerrain(false); setShowEdges(true);
+  };
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--paper-3)" }}>
-      <div style={{ padding: "8px 20px", background: "var(--paper-2)", borderBottom: "1px solid var(--line-soft)",
-                    display: "flex", alignItems: "center", gap: 14, flexShrink: 0, flexWrap: "wrap" }}>
-        {/* No "Back to single view" button here -- the header's own "4D Simulation" /
-            "3D View" tabs already exit this view (see App.jsx), so this would have
-            been a second, redundant way to do the same thing. */}
-        <strong style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase",
-                        color: "var(--ink-700)" }}>
-          Planned vs Actual
-        </strong>
-        {loadStatus && (
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-500)" }}>
-            {loadStatus}
-          </span>
-        )}
-        <div style={{ flex: 1 }} />
-        <Flag
-          label="Lock views" checked={locked} onChange={setLocked}
-          title="ON = orbiting, zooming or panning either pane applies the same move to the other, so both are always viewed from the same angle. OFF = each pane's camera is independent."
-        />
-        <Flag
-          label="Colour coding" checked={showStatusColors} onChange={setShowStatusColors}
-          title="ON = the Actual pane tints work red/green/yellow/blue by its traffic-light status -- recorded actual dates once they exist, and expected/forecast dates before that, each judged against the baseline. OFF = both panes still grow on schedule, but every element just keeps its own material colour."
-        />
-        {showStatusColors && (
-          <ColorCodingSettings
-            colors={statusColors}
-            onChange={(k, v) => setStatusColors(prev => ({ ...prev, [k]: v }))}
-            onReset={() => setStatusColors(DEFAULT_STATUS_COLORS)}
-          />
-        )}
-        <Flag
-          label="Upcoming activities" checked={showUpcoming} onChange={setShowUpcoming}
-          title="Shows current and future activities. The panel colours forecast dates against BL Start/Finish: red delayed, green on time, yellow ahead, blue in progress. With Colour coding on, it also applies the same baseline comparison in the 3D view."
-        />
-        <Flag
-          label="Colour terrain" checked={colourTerrain} onChange={setColourTerrain}
-          title="The terrain is one large element owned by the excavation activity, so colouring it hides the building behind a status-coloured sheet."
-        />
-        <Flag
-          label="Edges" checked={showEdges} onChange={setShowEdges}
-          title="Outlines each element as it's built, in both panes -- grouped by task the same way the build-up itself is, so the outline never gives away geometry that hasn't been reached yet."
-        />
-        <label title="The colour used to pick out whatever is selected -- click an element in either pane, or a task in the Gantt below. Both panes and the Gantt row stay in sync with each other."
-               style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--ink-600)",
-                       padding: "5px 9px", cursor: "pointer" }}>
-          <input type="color" value={highlightColor}
-                 onChange={e => setHighlightColor(e.target.value)}
-                 style={{ width: 22, height: 18, padding: 0, border: "1px solid var(--line-strong)",
-                          background: "none", cursor: "pointer" }} />
-          Highlight
-        </label>
-      </div>
-
       <div ref={splitRowRef} style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
         <div style={{ flex: `${splitFrac} 0 0`, minWidth: 0, borderRight: "1px solid var(--line-strong)" }}>
           <Viewport3D
@@ -399,6 +392,7 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
             showStatusColors={showStatusColors}
             showUpcoming={showUpcoming}
             statusColors={statusColors}
+            statusFilter={statusFilter}
             showEdges={showEdges}
             onReady={onPaneReady("planned")}
             selectedIds={plannedSelIds}
@@ -415,7 +409,7 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
           style={{
             position: "absolute", left: `calc(${splitFrac * 100}% - 3px)`, top: 0, bottom: 0, width: 6,
             cursor: "col-resize", zIndex: 2,
-            background: splitResizing ? "rgba(0,147,210,.5)" : "transparent",
+            background: splitResizing ? "rgba(63,110,140,.5)" : "transparent",
           }}
         />
         <div style={{ flex: `${1 - splitFrac} 0 0`, minWidth: 0 }}>
@@ -433,6 +427,8 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
             showStatusColors={showStatusColors}
             showUpcoming={showUpcoming}
             statusColors={statusColors}
+            statusFilter={statusFilter}
+            onStatusCounts={setStatusCounts}
             showEdges={showEdges}
             onReady={onPaneReady("actual")}
             selectedIds={actualSelIds}
@@ -441,14 +437,110 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
           />
         </div>
 
+        {/* Floating view controls, same as the single viewer: one compact toolbar top-right
+            with every toggle in its popover, instead of a full-width bar above the panes.
+            "Lock views" lives here too, as the first row. */}
+        <FloatingViewControls
+          onReset={resetDisplay} fullscreenRef={splitRowRef} onFit={fitBothPanes} top={PANE_CHROME_TOP}
+        >
+          <DisplaySection label="View">
+            <DisplayRow
+              icon={VP_ICONS.link} label="Lock views" checked={locked} onChange={setLocked}
+              title="ON = orbiting, zooming or panning either pane applies the same move to the other, so both are always viewed from the same angle. OFF = each pane's camera is independent."
+            />
+          </DisplaySection>
+          <DisplaySection label="Colour">
+            <DisplayRow
+              icon={VP_ICONS.palette} label="Colour coding" checked={showStatusColors} onChange={setShowStatusColors}
+              title="ON = the Actual pane tints work red/green/yellow/blue by its traffic-light status -- recorded actual dates once they exist, and expected/forecast dates before that, each judged against the baseline. OFF = both panes still grow on schedule, but every element just keeps its own material colour."
+            />
+            {showStatusColors && (
+              <div className="vp-sub">
+                <ColorCodingSettings
+                  colors={statusColors}
+                  onChange={(k, v) => setStatusColors(prev => ({ ...prev, [k]: v }))}
+                  onReset={() => setStatusColors(DEFAULT_STATUS_COLORS)}
+                />
+              </div>
+            )}
+            <DisplayRow
+              icon={VP_ICONS.calendar} label="Upcoming activities" checked={showUpcoming} onChange={setShowUpcoming}
+              title="Shows current and future activities. The panel colours forecast dates against BL Start/Finish: red delayed, green on time, yellow ahead, blue in progress. With Colour coding on, it also applies the same baseline comparison in the 3D view."
+            />
+          </DisplaySection>
+          <DisplaySection label="Scene">
+            <DisplayRow
+              icon={VP_ICONS.mountain} label="Colour terrain" checked={colourTerrain} onChange={setColourTerrain}
+              title="The terrain is one large element owned by the excavation activity, so colouring it hides the building behind a status-coloured sheet."
+            />
+            <DisplayRow
+              icon={VP_ICONS.box} label="Edges" checked={showEdges} onChange={setShowEdges}
+              title="Outlines each element as it's built, in both panes -- grouped by task the same way the build-up itself is, so the outline never gives away geometry that hasn't been reached yet."
+            />
+          </DisplaySection>
+          <DisplaySection label="Overlays">
+            <label className="vp-row"
+                   title="The colour used to pick out whatever is selected -- click an element in either pane, or a task in the Gantt below. Both panes and the Gantt row stay in sync with each other.">
+              <VpIcon d={VP_ICONS.highlighter} color="var(--ink-300)" />
+              <span className="vp-row-label">Highlight colour</span>
+              <input type="color" value={highlightColor} onChange={e => setHighlightColor(e.target.value)}
+                     className="vp-color" />
+            </label>
+          </DisplaySection>
+        </FloatingViewControls>
+
+        {/* Load status and the status legend / isolate filter float top-left over the
+            Planned pane, clear of the Display toolbar. */}
+        {(loadStatus || (showStatusColors && statusCounts)) && (
+          <div className="vp-legend" style={{ left: 12, top: PANE_CHROME_TOP }}>
+            {loadStatus && (
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-500)", padding: "0 6px" }}>
+                {loadStatus}
+              </span>
+            )}
+            {showStatusColors && statusCounts && (
+              <>
+                {STATUS_ORDER.map(k => {
+                  const active = statusFilter === k;
+                  return (
+                    <button
+                      key={k}
+                      onClick={() => setStatusFilter(active ? null : k)}
+                      title={active
+                        ? "Showing only this status in both panes. Click to show everything again."
+                        : `Click to show only "${TASK_STATUS[k].label}" elements in both panes. ` +
+                          `${statusCounts.elements?.[k] ?? 0} elements.`}
+                      className={"fchip" + (active ? " active" : statusFilter ? " dim" : "")}
+                      style={{ "--c": statusColors[k] }}
+                    >
+                      <span style={{ width: 10, height: 10, background: statusColors[k], borderRadius: 2,
+                                     display: "inline-block" }} />
+                      {TASK_STATUS[k].label}
+                      <strong>{statusCounts.tasks?.[k] ?? 0}</strong>
+                      <span style={{ color: "var(--ink-400)" }}>({statusCounts.elements?.[k] ?? 0} el)</span>
+                    </button>
+                  );
+                })}
+                {statusFilter && (
+                  <button className="fchip" onClick={() => setStatusFilter(null)}
+                          title="Show all statuses again" style={{ "--c": "var(--aar-blue)" }}>
+                    Clear ✕
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {/* The checkbox above was already wired to the tinting logic in Viewport3D
             but never actually rendered this list -- "Upcoming activities" looked
             like it did nothing when clicked. Floats over both panes, same as
             SimpleViewer's, driven off the merged `actualSchedule` the Gantt uses. */}
         {showUpcoming && actualSchedule?.hasSchedule && (
           <div style={{
-            position: "absolute", top: 12, right: 12, width: 292, maxHeight: "75%",
-            background: "rgba(255,255,255,.92)", backdropFilter: "blur(24px)",
+            position: "absolute", top: PANE_CHROME_TOP + 48, right: 12, width: 292,
+            maxHeight: `calc(100% - ${PANE_CHROME_TOP + 60}px)`,
+            background: "var(--paper)",
             border: "1px solid var(--line-soft)", boxShadow: "var(--elev-2)", display: "flex",
             flexDirection: "column", overflow: "hidden", zIndex: 5,
           }}>
@@ -504,7 +596,7 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
               style={{
                 position: "absolute", top: "50%", left: "50%",
                 transform: "translate(-50%, -50%)",
-                width: 44, height: 15, lineHeight: 1, fontSize: 9,
+                width: 44, height: 15, lineHeight: 1, fontSize: 10.5,
                 display: "flex", alignItems: "center", justifyContent: "center",
                 cursor: "pointer", padding: 0, borderRadius: 2,
                 border: "1px solid var(--line-strong)", background: "var(--paper)",
@@ -532,27 +624,5 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
         </>
       )}
     </div>
-  );
-}
-
-// Same checkbox-chip pattern used in SimpleViewer's toolbar.
-function Flag({ label, checked, onChange, title, fontSize = 13 }) {
-  return (
-    <label
-      title={title}
-      style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize, padding: "5px 9px",
-               cursor: "pointer", color: "var(--ink-600)", whiteSpace: "nowrap" }}
-    >
-      <span style={{
-        width: 13, height: 13, display: "grid", placeItems: "center", fontSize: 9, lineHeight: 1,
-        background: checked ? "var(--aar-blue)" : "var(--paper)",
-        border: "1px solid " + (checked ? "var(--aar-blue)" : "var(--line-strong)"), color: "#fff",
-      }}>
-        {checked ? "✓" : ""}
-      </span>
-      {label}
-      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
-             style={{ display: "none" }} />
-    </label>
   );
 }

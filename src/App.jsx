@@ -19,6 +19,10 @@
 // Optional: with no baseline the viewer still runs the full 4D build-up, it just labels
 // the columns "Planned" instead of "BL" and has no variance to colour.
 //
+// Now unimported and safe to delete if not wanted back:
+//   src/p6Xml.js, tools/check-p6-merge.mjs   the P6 XML path
+//   src/Split4D.jsx                          the old side-by-side comparison
+//
 // LAYOUT: follows the Aarvee "4D BIM Twin" mockup's own chrome -- a dark navy header
 // with the wordmark and mode tabs sitting where the mockup put "Structure / 4D
 // Progress / Cost / Quality / Clash" (three real tabs here, not five decorative
@@ -29,14 +33,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import SimpleViewer from './SimpleViewer';
 import SplitCompareView from './SplitCompareView';
-import logo from './assets/aarvee-logo.svg';
+import logo from './assets/RV.svg';
 import { calendarDaysBetween } from './ifcSchedule';
 
 const modeTab = (active) => ({
   display: 'flex', alignItems: 'center', gap: 7, fontFamily: 'inherit', fontSize: 12.5,
-  fontWeight: 500, padding: '6px 12px', border: 0,
-  background: active ? 'rgba(0,147,210,.12)' : 'transparent',
-  color: active ? 'var(--aar-blue-deep)' : 'var(--ink-500)', whiteSpace: 'nowrap',
+  fontWeight: active ? 600 : 500, padding: '7px 14px', border: 0, borderRadius: 'var(--r-sm)',
+  background: active ? 'var(--aar-blue)' : 'transparent',
+  color: active ? '#fff' : 'var(--ink-500)', whiteSpace: 'nowrap',
+  // Every tab (active, inactive, disabled) carries the same light 1px outline, so the
+  // three look uniform; the active one adds the glow on top.
+  boxShadow: active ? 'none' : '0 0 0 1px var(--line)',
 });
 
 // One mode tab, styled like the mockup's dot-prefixed "Structure / 4D Progress / ..."
@@ -46,10 +53,11 @@ function ModeTab({ active, dotColor, label, onClick, disabled, title }) {
   return (
     <button
       onClick={onClick} disabled={disabled} title={title}
-      style={{ ...modeTab(active), opacity: disabled ? 0.35 : 1,
+      style={{ ...modeTab(active), opacity: disabled ? 0.5 : 1,
                cursor: disabled ? 'not-allowed' : 'pointer' }}
     >
-      <span style={{ width: 7, height: 7, background: dotColor, display: 'inline-block', flexShrink: 0 }} />
+      <span style={{ width: 8, height: 8, borderRadius: 2, background: dotColor, display: 'inline-block',
+                     flexShrink: 0, boxShadow: active ? '0 0 0 1px rgba(255,255,255,.7)' : 'none' }} />
       {label}
     </button>
   );
@@ -79,6 +87,20 @@ export default function App() {
   const clear = (set) => () => set({ url: null, name: null, size: null, pickedAt: null });
 
   const canSplit = !!(model.url && baseline.url);
+  // The split view mounts (and starts its own load + both panes' render setup) the
+  // MOMENT both files are present, not when its tab is first opened -- same
+  // always-mounted philosophy SimpleViewer already uses (see the render below: it's
+  // just shown/hidden via CSS). Clicking "Planned vs Actual" used to be the moment
+  // that triggered loading both files a second time AND standing up two full 3D
+  // scenes, which is exactly the freeze users felt. Mounting eagerly moves that same
+  // work to run quietly in the background (while display:none) as soon as the second
+  // file is picked, so by the time the tab is actually clicked, there is nothing left
+  // to do but flip a CSS display property. Clearing either file drops it so it
+  // reloads fresh next time.
+  const [splitMounted, setSplitMounted] = useState(false);
+  useEffect(() => {
+    setSplitMounted(canSplit);
+  }, [canSplit]);
 
   // Header subtitle = the project's own name: the top-level heading of the task list
   // (first root task, e.g. "Sample Bridge"), so it follows whatever the schedule calls
@@ -151,8 +173,8 @@ export default function App() {
     }}>
       <header style={{
         display: 'flex', alignItems: 'center', gap: 22,
-        padding: '0 20px', height: 51, background: 'var(--paper)', color: 'var(--ink-700)', flexShrink: 0,
-        borderBottom: '1px solid var(--line-soft)',
+        padding: '0 20px', height: 56, background: 'var(--paper)', color: 'var(--ink-700)', flexShrink: 0,
+        borderBottom: '1px solid var(--line-soft)', boxShadow: 'var(--elev-1)',
         // The header has no wrap and nothing in it shrinks to nothing (logo, mode
         // tabs, badges all keep their natural width) -- on a narrow window the row
         // is simply wider than the viewport. The root container hides overflow-x
@@ -165,22 +187,22 @@ export default function App() {
         overflowX: 'auto', overflowY: 'hidden', scrollbarWidth: 'thin',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flexShrink: 0 }}>
-          <img src={logo} alt="Aarvee" style={{ height: 20, width: 'auto' }} />
-          <div style={{ width: 1, height: 22, background: 'var(--line-soft)' }} />
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
-            <span style={{ fontFamily: 'var(--font-logo)', fontSize: 21, fontWeight: 700,
-                          letterSpacing: '-0.02em', whiteSpace: 'nowrap',
+          <img src={logo} alt="Aarvee" style={{ height: 34, width: 'auto' }} />
+          <div style={{ width: 1, height: 34, background: 'var(--line-soft)' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+            <span style={{ fontFamily: 'var(--font-body)', fontSize: 20, fontWeight: 600,
+                          lineHeight: 1.1, letterSpacing: '-0.013em', whiteSpace: 'nowrap',
                           color: 'var(--logo-color)' }}>
               4D BIM Web Viewer
             </span>
-            <span style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase',
+            <span style={{ fontSize: 12.5, lineHeight: 1, letterSpacing: '0.08em', textTransform: 'uppercase',
                           color: 'var(--ink-400)', whiteSpace: 'nowrap' }}>
               {projectName}
             </span>
           </div>
         </div>
 
-        <div style={{ width: 1, height: 22, background: 'var(--line-soft)', flexShrink: 0 }} />
+        <div style={{ width: 1, height: 34, background: 'var(--line-soft)', flexShrink: 0 }} />
 
         <nav style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
           <ModeTab
@@ -234,9 +256,10 @@ export default function App() {
                                  : finishVariance < 0 ? 'var(--status-ontime)' : 'var(--ink-700)';
             return (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0,
-                            padding: '4px 12px', background: 'var(--paper)',
-                            border: '1px solid var(--line-soft)', borderLeftWidth: 3, borderLeftColor: varianceColor }}>
-                <span style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase',
+                            padding: '4px 14px', background: 'var(--paper)', borderRadius: 'var(--r-md)',
+                            boxShadow: 'var(--elev-1)',
+                            border: '1px solid var(--line-soft)', borderLeftWidth: 4, borderLeftColor: varianceColor }}>
+                <span style={{ fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase',
                               fontWeight: 600, color: 'var(--ink-500)' }}>
                   Finish variance
                 </span>
@@ -266,14 +289,22 @@ export default function App() {
         </div>
       )}
 
-      <div style={{ minHeight: 0, minWidth: 0 }}>
-        {mode === 'split' && canSplit ? (
-          <SplitCompareView plannedUrl={baseline.url} actualUrl={model.url} />
-        ) : (
-          // With only the Planned IFC picked, it becomes the primary model -- same 4D
-          // build-up as picking only the Updated IFC, just off its own (planned) dates
-          // since there is no progress to compare against. The baseline merge only
-          // makes sense once BOTH files are present.
+      <div style={{ minHeight: 0, minWidth: 0, position: 'relative' }}>
+        {/* Both views stay MOUNTED once they exist and are just shown/hidden. Switching
+            tabs used to unmount one viewer and mount the other, which threw away the
+            parsed IFC and re-parsed it every time -- that was the lag. The split view is
+            created lazily the first time its tab is opened (so it costs nothing until
+            then) and dropped again if either file is cleared. */}
+        {splitMounted && canSplit && (
+          <div style={{ height: '100%', display: mode === 'split' ? 'block' : 'none' }}>
+            <SplitCompareView plannedUrl={baseline.url} actualUrl={model.url} />
+          </div>
+        )}
+        <div style={{ height: '100%', display: mode === 'split' && canSplit ? 'none' : 'block' }}>
+          {/* With only the Planned IFC picked, it becomes the primary model -- same 4D
+              build-up as picking only the Updated IFC, just off its own (planned) dates
+              since there is no progress to compare against. The baseline merge only
+              makes sense once BOTH files are present. */}
           <SimpleViewer ifcUrl={model.url || baseline.url}
                         baselineUrl={model.url && baseline.url ? baseline.url : null}
                         onStatusChange={setViewerStatus}
@@ -291,7 +322,7 @@ export default function App() {
                             tooltip: 'The UPDATED export: the current Synchro IFC, with progress recorded. Supplies the geometry, the Actual Start/Finish of completed activities, and the current Start/Finish of everything still to come.',
                           },
                         ]} />
-        )}
+        </div>
       </div>
 
       <footer style={{
@@ -300,18 +331,16 @@ export default function App() {
         borderTop: '1px solid var(--line-strong)', flexShrink: 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <img src={logo} alt="" style={{ height: 12, width: 'auto' }} />
+          <img src={logo} alt="" style={{ height: 18, width: 'auto' }} />
           <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ink-700)', letterSpacing: '0.01em' }}>
-            Aarvee Engineering Consultants Ltd
+            Aarvee Engineering Consultants Limited
           </span>
-          <span style={{ fontSize: 11, color: 'var(--ink-600)' }}>Possibilities. Answered.</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10.5, color: 'var(--ink-600)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: 'var(--ink-600)' }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%',
                         background: model.url || baseline.url ? 'var(--status-ontime)' : 'var(--ink-300)',
                         display: 'inline-block' }} />
           {model.url || baseline.url ? 'Model synced' : 'No model loaded'}
-          <span style={{ fontFamily: 'var(--font-mono)' }}>v1.0.0</span>
         </div>
       </footer>
     </div>
