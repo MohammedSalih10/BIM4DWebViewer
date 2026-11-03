@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.claude/
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+*.ifc
+# P6 exports used as test data (the app no longer reads them)
+*.xml
+
+# scratch / verification output
+*.png
+screenshots/

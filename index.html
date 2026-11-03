@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>4D BIM Web Viewer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- web-ifc iife wrapper must load first so it creates the needed imports/env -->
+    <script src="/wasm/web-ifc-api-iife.js"></script>
+
+    <!-- then load the app -->
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

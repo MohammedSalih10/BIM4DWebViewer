@@ -1,0 +1,102 @@
+/* ============================================================
+   Aarvee Engineering Consultants -- design tokens
+   Ported from the "4D BIM Viewer" mockup (Aarvee Deliverables /
+   Figma). Primary brand color: #0093D2 ("Aarvee Blue").
+
+   Every component's inline styles reference these as CSS custom
+   properties (e.g. `color: 'var(--ink-700)'`), the same pattern
+   the mockup itself used, so there is exactly one place that
+   defines "what Aarvee Blue is" for the whole app.
+   ============================================================ */
+
+/* Golos Text (body) and PT Serif (headings) -- the mockup's own custom display
+   faces ("Aarvee BT"/"Aarvee Demi") are commercial and not shipped here; PT Serif
+   plus the system serif stack stands in for them everywhere --font-display is used. */
+@import url("https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=PT+Serif:ital,wght@0,400;0,700;1,400&display=swap");
+
+:root {
+  /* --- Brand primaries (Aarvee Blue family) ---------------- */
+  --aar-blue:        #0093D2;
+  --aar-blue-deep:   #006A92;
+  --aar-blue-mid:    #408CA5;
+  --aar-blue-bright: #00AAE5;
+  --aar-blue-tint:   #E1EDF1;
+  --aar-blue-haze:   #D8EDF5;
+  --aar-blue-fog:    #E6F4FB;
+
+  /* --- Ink (deep navy default text) ------------------------- */
+  --ink-900: #00182F;
+  --ink-800: #00212D;
+  --ink-700: #0B2038;
+  --ink-600: #2E4459;
+  --ink-500: #445A6E;
+  --ink-400: #5B636B;
+  --ink-300: #7C8894;
+
+  /* --- Neutrals ---------------------------------------------- */
+  --paper:       #FFFFFF;
+  --paper-2:     #F6F6F6;
+  --paper-3:     #EAEBED;
+  --paper-4:     #E7EAED;
+  --paper-cool:  #ECEDEF;
+  --line-soft:   #E2E7E9;
+  --line:        #D0D1D2;
+  --line-strong: #CCD3D6;
+
+  /* --- Status (traffic-light) colours ------------------------ */
+  --status-delayed:  #F0353D;
+  --status-progress: #0093D2;
+  --status-ontime:   #1FA85C;
+  --status-ahead:    #E8A33D;
+  --status-baseline: var(--ink-300);
+
+  /* --- Type ---------------------------------------------------- */
+  --font-display: "PT Serif", "Times New Roman", serif;
+  --font-body:    "Golos Text", -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono:    ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* Taberna (Latinotype) is the dedicated wordmark face for the "4D BIM Viewer"
+     logotype -- a commercial display font, not bundled/imported here (it isn't
+     on Google Fonts), so it only takes effect if installed locally; PT Serif
+     is the fallback everywhere else. */
+  --font-logo:    "Taberna", "PT Serif", "Times New Roman", serif;
+
+  /* --- Wordmark accent -- flat black for the "4D BIM Viewer" mark only,
+       so it doesn't reuse --aar-blue-deep (already spread across the
+       Gantt bars and dialog chrome). ------------------------------------- */
+  --logo-color: #000000;
+
+  /* --- Spacing (8pt) --------------------------------------------- */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px;
+  --s-6: 32px; --s-7: 48px; --s-8: 64px;
+
+  /* --- Radii -- Aarvee designs are sharp; 0 by default -------- */
+  --r-0: 0;
+  --r-sm: 2px;
+  --r-md: 4px;
+
+  /* --- Elevation ---------------------------------------------- */
+  --elev-1: 0 1px 2px rgba(0, 33, 45, 0.06), 0 1px 1px rgba(0, 33, 45, 0.04);
+  --elev-2: 0 6px 18px rgba(0, 33, 45, 0.08);
+  --elev-3: 0 18px 40px rgba(0, 33, 45, 0.14);
+}
+
+html, body, #root { height: 100%; margin: 0; }
+body {
+  color: var(--ink-700);
+  font-family: var(--font-body);
+  background: var(--paper-3);
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+
+input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; }
+input[type=range]::-webkit-slider-runnable-track { height: 4px; background: var(--line-strong); }
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px;
+  background: var(--aar-blue); border: 2px solid var(--paper);
+  box-shadow: 0 1px 3px rgba(0, 33, 45, .35); border-radius: 50%; cursor: pointer;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); }
+::-webkit-scrollbar-track { background: var(--paper-2); }
