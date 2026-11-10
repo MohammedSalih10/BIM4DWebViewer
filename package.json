@@ -1,14 +1,26 @@
 {
   "name": "4d-bim-web-viewer",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
+  "description": "Browser-based 4D BIM viewer: IFC geometry plus the embedded construction schedule, played on a timeline with traffic-light status colouring.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:single": "node tools/check-single-file.mjs",
+    "check:baseline": "node tools/check-ifc-baseline.mjs",
+    "check:bl-merge": "node tools/check-bl-merge.mjs",
+    "check:growth": "node tools/check-growth.mjs",
+    "check:variance": "node tools/variance-report.mjs",
+    "check:gantt": "node tools/check-gantt-render.mjs"
   },
-  "keywords": [],
+  "keywords": [
+    "bim",
+    "4d",
+    "ifc",
+    "construction-schedule",
+    "three.js"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
@@ -16,11 +28,11 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "three": "^0.149.0",
-    "vite": "^8.1.5",
     "web-ifc": "^0.0.77",
     "web-ifc-three": "^0.0.126"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^6.0.4"
+    "@vitejs/plugin-react": "^6.0.4",
+    "vite": "^8.1.5"
   }
 }

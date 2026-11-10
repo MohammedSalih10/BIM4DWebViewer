@@ -248,7 +248,7 @@ export default function SimpleViewer({
         await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
         if (!running) return;
         const loader = new IFCLoader();
-        await loader.ifcManager.setWasmPath("/wasm/");
+        await loader.ifcManager.setWasmPath(`${import.meta.env.BASE_URL}wasm/`);
 
         setStatus("Loading IFC (large files take a while)...");
         const model = await loader.loadAsync(ifcUrl);

@@ -19,10 +19,6 @@
 // Optional: with no baseline the viewer still runs the full 4D build-up, it just labels
 // the columns "Planned" instead of "BL" and has no variance to colour.
 //
-// Now unimported and safe to delete if not wanted back:
-//   src/p6Xml.js, tools/check-p6-merge.mjs   the P6 XML path
-//   src/Split4D.jsx                          the old side-by-side comparison
-//
 // LAYOUT: follows the Aarvee "4D BIM Twin" mockup's own chrome -- a dark navy header
 // with the wordmark and mode tabs sitting where the mockup put "Structure / 4D
 // Progress / Cost / Quality / Clash" (three real tabs here, not five decorative
@@ -79,12 +75,22 @@ export default function App() {
 
   // A blob: URL carries no filename, so the name (and size/pick time, for the "Source
   // files" row's meta line) has to travel alongside it to be shown.
-  const pick = (set) => (e) => {
+  //
+  // Each blob: URL pins the whole picked file in memory until it is revoked, so the one
+  // being replaced / cleared is released here. Done in the handlers (not an effect) so it
+  // runs exactly once per pick, whatever the viewers' own effects re-run on.
+  const pick = (set, current) => (e) => {
     const f = e.target.files[0];
-    if (f) set({ url: URL.createObjectURL(f), name: f.name, size: f.size, pickedAt: new Date() });
+    if (f) {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      set({ url: URL.createObjectURL(f), name: f.name, size: f.size, pickedAt: new Date() });
+    }
     e.target.value = ''; // so picking the same filename again still fires onChange
   };
-  const clear = (set) => () => set({ url: null, name: null, size: null, pickedAt: null });
+  const clear = (set, current) => () => {
+    if (current?.url) URL.revokeObjectURL(current.url);
+    set({ url: null, name: null, size: null, pickedAt: null });
+  };
 
   const canSplit = !!(model.url && baseline.url);
   // The split view mounts (and starts its own load + both panes' render setup) the
@@ -313,12 +319,12 @@ export default function App() {
                         sourceFiles={[
                           {
                             label: 'Planned IFC', dotColor: 'var(--ink-700)', file: baseline, accept: '.ifc',
-                            onPick: pick(setBaseline), onClear: clear(setBaseline),
+                            onPick: pick(setBaseline, baseline), onClear: clear(setBaseline, baseline),
                             tooltip: 'The PLANNED export, taken after planning and BEFORE any progress was recorded. Matched to the updated file on activity code -- the only source of true BL Start / BL Finish, because recording progress overwrites the planned dates in place. Optional: without it the viewer still runs the 4D build-up, it just has no variance to colour.',
                           },
                           {
                             label: 'Updated IFC', dotColor: 'var(--aar-blue)', file: model, accept: '.ifc',
-                            onPick: pick(setModel), onClear: clear(setModel),
+                            onPick: pick(setModel, model), onClear: clear(setModel, model),
                             tooltip: 'The UPDATED export: the current Synchro IFC, with progress recorded. Supplies the geometry, the Actual Start/Finish of completed activities, and the current Start/Finish of everything still to come.',
                           },
                         ]} />

@@ -16,7 +16,38 @@
    Google Fonts; PT Serif is the fallback for anyone missing those woff2 files.
    aarvee.com sets its headings at font-weight 400-500 (never bold) with ~120%
    line-height; --font-display/--font-logo follow the same convention wherever used. */
-@import url("https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=PT+Serif:ital,wght@0,400;0,700;1,400&display=swap");
+/* Golos Text + PT Serif -- self-hosted (latin subset, from Google Fonts) instead of an
+   @import from fonts.googleapis.com, so the app renders identically on locked-down or
+   offline networks that block the CDN. Golos Text is ONE variable-weight file covering
+   400-700; glyphs outside the latin subset fall back to the system font stack. */
+@font-face {
+  font-family: "Golos Text";
+  src: url("./assets/fonts/GolosText-Variable.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "PT Serif";
+  src: url("./assets/fonts/PTSerif-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "PT Serif";
+  src: url("./assets/fonts/PTSerif-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "PT Serif";
+  src: url("./assets/fonts/PTSerif-Italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
 
 /* Ivyoradisplay itself -- self-hosted (not hotlinked to aarvee.com's CDN) so the
    wordmark doesn't depend on their Webflow asset URLs staying put. Only the two

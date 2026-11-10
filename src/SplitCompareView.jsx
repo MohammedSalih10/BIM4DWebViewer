@@ -154,7 +154,7 @@ export default function SplitCompareView({ plannedUrl, actualUrl }) {
         await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
         if (cancelled) return;
         const loader = new IFCLoader();
-        await loader.ifcManager.setWasmPath("/wasm/");
+        await loader.ifcManager.setWasmPath(`${import.meta.env.BASE_URL}wasm/`);
         loaderRef.current = loader;
 
         // The only reliable way to learn a just-loaded model's REAL id -- see the
