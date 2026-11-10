@@ -166,7 +166,7 @@ try {
     // task with actuals adds one per filled cell. Matching on the date text instead
     // gives false positives -- the bar's title tooltip repeats it.
     console.log("\nACTUAL COLUMNS ARE RECORDED FACTS ONLY");
-    const GREEN = "#1b5e20";
+    const GREEN = "color:var(--status-ontime)";
     const countGreen = (task) => {
       const one = { ...fixture(), rows: [task], tasks: new Map([[task.id, task]]) };
       const out = ReactDOMServer.renderToString(

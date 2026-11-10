@@ -35,7 +35,7 @@ export default function ElementDetailsDialog({ details, onClose, placement = "bo
       }}>
         <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid var(--line-soft)", display: "flex",
                       justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-          <span style={{ fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 15, lineHeight: 1.2,
+          <span style={{ fontWeight: 600, fontSize: 14.5, lineHeight: 1.2,
                         color: "var(--ink-700)" }}>Element Details</span>
           <button
             onClick={onClose} title="Close"
